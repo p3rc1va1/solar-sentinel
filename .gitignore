@@ -1,0 +1,37 @@
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/dist/
+**/build/
+
+# Virtual environment
+**/.venv/
+**/venv/
+
+# Environment variables
+**/.env
+
+# Data (generated at runtime)
+**/data/solar_sentinel.db
+**/data/detections/
+**/data/reports/
+**/data/models/
+
+# IDE
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Testing / Coverage
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+
+# uv
+**/.python-version
