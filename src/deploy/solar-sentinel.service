@@ -1,0 +1,23 @@
+[Unit]
+Description=Solar Sentinel — Autonomous Solar Panel Defect Detection
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pi
+WorkingDirectory=/opt/solar-sentinel
+ExecStart=/usr/local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/solar-sentinel/data
+
+[Install]
+WantedBy=multi-user.target

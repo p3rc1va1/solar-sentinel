@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Solar Sentinel — Autonomous solar panel defect detection and monitoring dashboard">
+    <title>Solar Sentinel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/>
+                            <line x1="12" y1="1" x2="12" y2="3"/>
+                            <line x1="12" y1="21" x2="12" y2="23"/>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                            <line x1="1" y1="12" x2="3" y2="12"/>
+                            <line x1="21" y1="12" x2="23" y2="12"/>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                        </svg>
+                    </div>
+                    <span class="logo-text">Solar Sentinel</span>
+                </div>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#" class="nav-link active" data-page="dashboard">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    Dashboard
+                </a></li>
+                <li><a href="#" class="nav-link" data-page="detections">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Detections
+                </a></li>
+                <li><a href="#" class="nav-link" data-page="reports">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Reports
+                </a></li>
+                <li><a href="#" class="nav-link" data-page="live">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    Live Feed
+                </a></li>
+                <li><a href="#" class="nav-link" data-page="settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Settings
+                </a></li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="status-indicator" id="systemStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <section class="page active" id="page-dashboard">
+                <header class="page-header">
+                    <h1>Dashboard</h1>
+                    <button class="btn btn-primary" id="btnCapture">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                        Capture Now
+                    </button>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">CPU Temperature</div>
+                        <div class="stat-value" id="statTemp">--°C</div>
+                        <div class="stat-sub">Raspberry Pi 5</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Memory</div>
+                        <div class="stat-value" id="statMemory">--%</div>
+                        <div class="stat-sub" id="statMemoryDetail">-- MB available</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Disk</div>
+                        <div class="stat-value" id="statDisk">--%</div>
+                        <div class="stat-sub" id="statDiskDetail">-- GB free</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">API Calls Today</div>
+                        <div class="stat-value" id="statApi">--</div>
+                        <div class="stat-sub">Gemini API</div>
+                    </div>
+                </div>
+
+                <div class="content-grid">
+                    <div class="card">
+                        <h2>Recent Detections</h2>
+                        <div class="table-wrap">
+                            <table id="dashDetections">
+                                <thead>
+                                    <tr><th>Time</th><th>Class</th><th>Confidence</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Recent Reports</h2>
+                        <div class="table-wrap">
+                            <table id="dashReports">
+                                <thead>
+                                    <tr><th>Time</th><th>Severity</th><th>QA</th><th>Score</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Detections Page -->
+            <section class="page" id="page-detections">
+                <header class="page-header"><h1>Detection History</h1></header>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table id="detectionsTable">
+                            <thead>
+                                <tr><th>ID</th><th>Time</th><th>Class</th><th>Confidence</th><th>Panel</th><th>Report</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reports Page -->
+            <section class="page" id="page-reports">
+                <header class="page-header"><h1>Reports</h1></header>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table id="reportsTable">
+                            <thead>
+                                <tr><th>ID</th><th>Time</th><th>Severity</th><th>Urgency</th><th>QA Score</th><th>Approved</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card" id="reportDetail" style="display:none;">
+                    <h2>Report Detail</h2>
+                    <div id="reportContent" class="report-content"></div>
+                </div>
+            </section>
+
+            <!-- Live Feed Page -->
+            <section class="page" id="page-live">
+                <header class="page-header"><h1>Live Camera Feed</h1></header>
+                <div class="card feed-card">
+                    <img id="liveFeed" src="" alt="Camera feed" class="live-feed-img">
+                    <p class="feed-note">MJPEG stream from Pi Camera Module 3 Wide</p>
+                </div>
+            </section>
+
+            <!-- Settings Page -->
+            <section class="page" id="page-settings">
+                <header class="page-header"><h1>Settings</h1></header>
+                <div class="settings-grid">
+                    <div class="card">
+                        <h2>Gemini API</h2>
+                        <details class="setup-guide">
+                            <summary>How to get your API key</summary>
+                            <ol>
+                                <li>Go to <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a></li>
+                                <li>Sign in with your Google account</li>
+                                <li>Click <strong>"Create API Key"</strong></li>
+                                <li>Choose any Google Cloud project (or create one)</li>
+                                <li>Copy the generated key and paste it below</li>
+                            </ol>
+                            <p class="guide-note">Free tier includes multiple models with generous daily limits.</p>
+                        </details>
+                        <div class="form-group">
+                            <label for="geminiKey">API Key</label>
+                            <input type="password" id="geminiKey" placeholder="Enter your Gemini API key">
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Email Notifications</h2>
+                        <details class="setup-guide">
+                            <summary>How to set up Gmail SMTP</summary>
+                            <ol>
+                                <li>Go to <a href="https://myaccount.google.com/security" target="_blank">Google Account Security</a></li>
+                                <li>Enable <strong>2-Step Verification</strong> if not already on</li>
+                                <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank">App Passwords</a></li>
+                                <li>Select app: <strong>"Other (Custom name)"</strong> → type <em>"Solar Sentinel"</em></li>
+                                <li>Click <strong>Generate</strong> — copy the 16-character password</li>
+                                <li>Use your Gmail address as both Email Address and SMTP Username</li>
+                                <li>Paste the app password as SMTP Password</li>
+                            </ol>
+                            <p class="guide-note">SMTP Host: smtp.gmail.com · Port: 587 · These are pre-filled.</p>
+                        </details>
+                        <div class="form-group toggle-group">
+                            <input type="checkbox" id="emailEnabled" class="toggle-input">
+                            <label for="emailEnabled" class="toggle-switch"><span class="toggle-knob"></span></label>
+                            <label for="emailEnabled" class="toggle-text">Enable Email</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="emailAddr">Email Address</label>
+                            <input type="email" id="emailAddr" placeholder="user@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtpHost">SMTP Host</label>
+                            <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtpPort">SMTP Port</label>
+                            <input type="number" id="smtpPort" value="587">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtpUser">SMTP Username</label>
+                            <input type="text" id="smtpUser" placeholder="user@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtpPass">SMTP Password</label>
+                            <input type="password" id="smtpPass" placeholder="App password">
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Telegram Notifications</h2>
+                        <details class="setup-guide">
+                            <summary>How to set up a Telegram bot</summary>
+                            <ol>
+                                <li>Open Telegram and search for <strong>@BotFather</strong></li>
+                                <li>Send <code>/newbot</code> and follow prompts to name your bot</li>
+                                <li>Copy the <strong>Bot Token</strong> (looks like <code>123456:ABC-DEF...</code>)</li>
+                                <li>Start a chat with your new bot (search its username, press Start)</li>
+                                <li>To get your Chat ID, send any message to the bot, then open:<br>
+                                    <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code></li>
+                                <li>Find <code>"chat":{"id":123456789}</code> in the response — that's your Chat ID</li>
+                            </ol>
+                            <p class="guide-note">The bot will send defect reports and images to this chat.</p>
+                        </details>
+                        <div class="form-group toggle-group">
+                            <input type="checkbox" id="telegramEnabled" class="toggle-input">
+                            <label for="telegramEnabled" class="toggle-switch"><span class="toggle-knob"></span></label>
+                            <label for="telegramEnabled" class="toggle-text">Enable Telegram</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="tgToken">Bot Token</label>
+                            <input type="password" id="tgToken" placeholder="123456:ABC-...">
+                        </div>
+                        <div class="form-group">
+                            <label for="tgChat">Chat ID</label>
+                            <input type="text" id="tgChat" placeholder="123456789">
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Detection Thresholds</h2>
+                        <div class="form-group">
+                            <label for="confHigh">HIGH Confidence (triggers alert)</label>
+                            <input type="range" id="confHigh" min="0.5" max="0.95" step="0.05" value="0.70">
+                            <span class="range-value" id="confHighVal">0.70</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="confMedium">MEDIUM Confidence (daily digest)</label>
+                            <input type="range" id="confMedium" min="0.2" max="0.7" step="0.05" value="0.45">
+                            <span class="range-value" id="confMediumVal">0.45</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="btnSaveSettings" style="margin-top:1rem;">Save Settings</button>
+                <span class="save-status" id="saveStatus"></span>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

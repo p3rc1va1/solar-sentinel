@@ -1,0 +1,87 @@
+analyze_defect_task:
+  description: >
+    Analyze the following solar panel defect detection.
+
+    ## Current Detection
+    - Defect class: {defect_class}
+    - Confidence score: {confidence}
+    - Bounding box: {bbox}
+    - Panel ID: {panel_id}
+    - Timestamp: {timestamp}
+
+    ## Environmental Context
+    - Weather: {weather_summary}
+    - Temperature: {temperature}
+
+    ## Historical Context (Last 7 Days)
+    {historical_context}
+
+    ## Instructions
+    1. Assess severity: CRITICAL, WARNING, or INFO
+    2. Identify the most likely root cause
+    3. Determine urgency: IMMEDIATE, WITHIN_1_WEEK, or ROUTINE
+    4. Check for trends compared to historical data
+    5. Provide a preliminary recommendation
+
+  expected_output: >
+    Respond with a JSON object containing these exact keys:
+    severity (CRITICAL/WARNING/INFO), root_cause (string),
+    urgency (IMMEDIATE/WITHIN_1_WEEK/ROUTINE), trend_analysis (string),
+    preliminary_recommendation (string), confidence_assessment (string).
+  agent: analyzer_agent
+
+write_report_task:
+  description: >
+    Using the defect analysis below, create a maintenance action report.
+
+    ## Required Sections
+    1. EXECUTIVE SUMMARY (2-3 sentences)
+    2. DEFECT DETAILS (class, location, severity, confidence)
+    3. ROOT CAUSE ANALYSIS
+    4. TREND ANALYSIS (comparison with last 7 days)
+    5. RECOMMENDED ACTIONS (numbered, specific, actionable steps)
+    6. PRIORITY AND TIMELINE
+    7. SAFETY CONSIDERATIONS (if applicable)
+
+    ## Analysis Input
+    {analyzer_output}
+
+    Format the report in Markdown. Keep it concise — maximum 400 words.
+
+  expected_output: >
+    A complete Markdown-formatted maintenance report ready for
+    delivery via email and Telegram.
+  agent: report_writer_agent
+
+qa_review_task:
+  description: >
+    Review the following maintenance report for quality and accuracy.
+
+    ## Original Detection Data
+    - Defect class: {defect_class}
+    - Confidence: {confidence}
+    - Timestamp: {timestamp}
+
+    ## Analyzer Output
+    {analyzer_output}
+
+    ## Report to Review
+    {report_content}
+
+    ## Review Checklist
+    1. Does the severity match the detection confidence and defect class?
+    2. Are all recommended actions physically possible and safe?
+    3. Is the timeline realistic for the stated severity?
+    4. Are there any claims not supported by the detection data?
+    5. Is the language clear and free of technical jargon?
+    6. Is the report concise (under 400 words)?
+
+    Score the report 1-10 and provide specific feedback.
+    If score >= 7, approve for delivery.
+    If < 7, rewrite the report incorporating your feedback.
+
+  expected_output: >
+    Respond with a JSON object containing: score (integer 1-10),
+    approved (boolean), feedback (string with specific notes),
+    revised_report (the final report markdown, revised if needed).
+  agent: qa_reviewer_agent
