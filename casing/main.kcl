@@ -1,0 +1,391 @@
+@settings(defaultLengthUnit = mm, kclVersion = 1.0)
+
+caseLength = 160
+caseWidth = 112
+baseHeight = 52
+wall = 3.2
+featureOverlap = 0.4
+
+lidThickness = 4
+lidLipHeight = 11
+lidOverhang = 8
+lipClearance = 0.35
+lidExplodeGap = 0
+lidLipBand = 6
+
+gasketGrooveWidth = 2.4
+gasketGrooveDepth = 1.8
+
+dripRibInset = 2.5
+dripRibWidth = 1.4
+dripRibDepth = 1.2
+
+piHoleSpacingX = 58
+piHoleSpacingY = 49
+piStandoffOuterDia = 7.5
+piStandoffHoleDia = 2.9
+piStandoffHeight = 6
+
+cameraCenterZ = 24
+cameraClearWidth = 12
+cameraClearHeight = 12
+
+snapFitClearance = 0.5
+snapArmY = 38
+snapArmWidth = 16
+snapArmTopZ = 1.2
+snapArmBottomZ = -12.6
+snapRootHoldHeight = 1.6
+snapArmRootOuterInset = 1.2
+snapArmRootInnerInset = 2.4
+snapNubOuterInset = -0.65
+snapNubTopZ = -7.8
+snapNubBottomZ = -10
+snapPocketDepth = 1.5
+snapPocketHeight = 2.8
+
+mountPlateWidth = 120
+mountPlateHeight = 44
+mountPlateThickness = 5.4
+mountGap = 8
+mountFrameSideWidth = 10
+mountFrameTopWidth = 11
+mountStrapSlotWidth = 70
+mountStrapSlotHeight = 8
+mountStrapSlotOffsetZ = 10
+mountM4HoleDia = 4.5
+mountM5HoleDia = 5.6
+mountM4HoleX = 26
+mountM4HoleOffsetZ = 17
+mountM5HoleX = 46
+
+powerEntryY = -26
+powerEntryZ = 16
+powerGlandBossDia = 24
+powerGlandBossDepth = 3.5
+powerGlandHoleDia = 15.5
+powerHoodWidth = 30
+powerHoodHeight = 4
+powerHoodDepth = 9
+powerHoodOffsetZ = 11
+
+baseColor = "#d7ddd8"
+lidColor = "#f0f2ef"
+windowColor = "#8bc7ff"
+
+piHoleX = piHoleSpacingX / 2
+piHoleY = piHoleSpacingY / 2
+lidLipOuterLength = caseLength - 2 * wall - 2 * lipClearance
+lidLipOuterWidth = caseWidth - 2 * wall - 2 * lipClearance
+lidHalfLengthOuter = lidLipOuterLength / 2
+
+gasketOuterLength = caseLength - 2 * wall + 4
+gasketOuterWidth = caseWidth - 2 * wall + 4
+gasketInnerLength = gasketOuterLength - 2 * gasketGrooveWidth
+gasketInnerWidth = gasketOuterWidth - 2 * gasketGrooveWidth
+
+dripOuterLength = caseLength + 2 * lidOverhang - 2 * dripRibInset
+dripOuterWidth = caseWidth + 2 * lidOverhang - 2 * dripRibInset
+dripInnerLength = dripOuterLength - 2 * dripRibWidth
+dripInnerWidth = dripOuterWidth - 2 * dripRibWidth
+
+snapNubCenterZ = (snapNubTopZ + snapNubBottomZ) / 2
+snapPocketCenterZ = baseHeight + snapNubCenterZ
+snapPocketBottomZ = snapPocketCenterZ - snapPocketHeight / 2
+snapPocketWidthY = snapArmWidth + snapFitClearance
+snapReliefWidthY = snapArmWidth + 2 * snapFitClearance
+snapReliefBottomZ = snapArmBottomZ - 0.4
+snapReliefTopZ = -snapRootHoldHeight
+
+leftArmRootOuterX = -lidHalfLengthOuter + snapArmRootOuterInset
+leftArmRootInnerX = -lidHalfLengthOuter + snapArmRootInnerInset
+leftNubOuterX = -lidHalfLengthOuter + snapNubOuterInset
+rightArmRootInnerX = lidHalfLengthOuter - snapArmRootInnerInset
+rightArmRootOuterX = lidHalfLengthOuter - snapArmRootOuterInset
+rightNubOuterX = lidHalfLengthOuter - snapNubOuterInset
+
+leftReliefOuterX = leftNubOuterX - 0.25
+leftReliefInnerX = leftArmRootInnerX + 0.45
+leftReliefWidthX = leftReliefInnerX - leftReliefOuterX
+rightReliefInnerX = rightArmRootInnerX - 0.45
+rightReliefOuterX = rightNubOuterX + 0.25
+rightReliefWidthX = rightReliefOuterX - rightReliefInnerX
+
+leftPocketOuterX = -caseLength / 2 + wall - snapPocketDepth
+rightPocketInnerX = caseLength / 2 - wall
+
+mountPlateCenterZ = baseHeight / 2 - 2
+mountTopSlotZ = mountPlateCenterZ + mountStrapSlotOffsetZ
+mountBottomSlotZ = mountPlateCenterZ - mountStrapSlotOffsetZ
+mountM4TopZ = mountPlateCenterZ + mountM4HoleOffsetZ
+mountM4BottomZ = mountPlateCenterZ - mountM4HoleOffsetZ
+mountBridgeDepth = mountGap + mountPlateThickness + featureOverlap
+mountBlockDepth = mountBridgeDepth + wall / 2 - featureOverlap
+mountPocketWidth = mountPlateWidth - 2 * mountFrameSideWidth
+mountPocketHeight = mountPlateHeight - 2 * mountFrameTopWidth
+mountTopZ = mountPlateCenterZ + mountPlateHeight / 2
+
+assert(mountTopZ, isLessThan = baseHeight - 1, error = "Rear mount too tall for lid clearance")
+
+frontPlane = offsetPlane(-XZ, offset = caseWidth / 2 - featureOverlap)
+frontCutPlane = offsetPlane(-XZ, offset = caseWidth / 2 - wall / 2)
+innerFrontPlane = offsetPlane(-XZ, offset = caseWidth / 2 - wall)
+backPlane = offsetPlane(XZ, offset = caseWidth / 2 - featureOverlap)
+backCutPlane = offsetPlane(XZ, offset = caseWidth / 2 - wall / 2)
+backMountPlane = offsetPlane(XZ, offset = caseWidth / 2 + mountGap - featureOverlap)
+rightPlane = offsetPlane(YZ, offset = caseLength / 2 - featureOverlap)
+rightCutPlane = offsetPlane(YZ, offset = caseLength / 2 - wall / 2)
+innerFloorPlane = offsetPlane(XY, offset = wall - featureOverlap)
+
+baseOuter = startSketchOn(XY)
+  |> rectangle(corner = [-caseLength / 2, -caseWidth / 2], width = caseLength, height = caseWidth)
+  |> extrude(length = baseHeight)
+
+baseShell = shell(baseOuter, faces = [END], thickness = wall)
+
+piStandoff1 = startSketchOn(innerFloorPlane)
+  |> circle(center = [piHoleX, piHoleY], radius = piStandoffOuterDia / 2)
+  |> subtract2d(tool = circle(center = [piHoleX, piHoleY], radius = piStandoffHoleDia / 2))
+  |> extrude(length = piStandoffHeight + featureOverlap)
+
+piStandoff2 = startSketchOn(innerFloorPlane)
+  |> circle(center = [piHoleX, -piHoleY], radius = piStandoffOuterDia / 2)
+  |> subtract2d(tool = circle(center = [piHoleX, -piHoleY], radius = piStandoffHoleDia / 2))
+  |> extrude(length = piStandoffHeight + featureOverlap)
+
+piStandoff3 = startSketchOn(innerFloorPlane)
+  |> circle(center = [-piHoleX, piHoleY], radius = piStandoffOuterDia / 2)
+  |> subtract2d(tool = circle(center = [-piHoleX, piHoleY], radius = piStandoffHoleDia / 2))
+  |> extrude(length = piStandoffHeight + featureOverlap)
+
+piStandoff4 = startSketchOn(innerFloorPlane)
+  |> circle(center = [-piHoleX, -piHoleY], radius = piStandoffOuterDia / 2)
+  |> subtract2d(tool = circle(center = [-piHoleX, -piHoleY], radius = piStandoffHoleDia / 2))
+  |> extrude(length = piStandoffHeight + featureOverlap)
+
+
+mountBlock = startSketchOn(backCutPlane)
+  |> rectangle(center = [0, mountPlateCenterZ], width = mountPlateWidth, height = mountPlateHeight)
+  |> extrude(length = mountBlockDepth)
+
+mountPocketCut = startSketchOn(backPlane)
+  |> rectangle(center = [0, mountPlateCenterZ], width = mountPocketWidth, height = mountPocketHeight)
+  |> extrude(length = mountGap + featureOverlap)
+
+mountTopStrapCut = startSketchOn(backMountPlane)
+  |> rectangle(center = [0, mountTopSlotZ], width = mountStrapSlotWidth, height = mountStrapSlotHeight)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountBottomStrapCut = startSketchOn(backMountPlane)
+  |> rectangle(center = [0, mountBottomSlotZ], width = mountStrapSlotWidth, height = mountStrapSlotHeight)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM4Cut1 = startSketchOn(backMountPlane)
+  |> circle(center = [-mountM4HoleX, mountM4TopZ], radius = mountM4HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM4Cut2 = startSketchOn(backMountPlane)
+  |> circle(center = [mountM4HoleX, mountM4TopZ], radius = mountM4HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM4Cut3 = startSketchOn(backMountPlane)
+  |> circle(center = [-mountM4HoleX, mountM4BottomZ], radius = mountM4HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM4Cut4 = startSketchOn(backMountPlane)
+  |> circle(center = [mountM4HoleX, mountM4BottomZ], radius = mountM4HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM5Cut1 = startSketchOn(backMountPlane)
+  |> circle(center = [-mountM5HoleX, mountPlateCenterZ], radius = mountM5HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountM5Cut2 = startSketchOn(backMountPlane)
+  |> circle(center = [mountM5HoleX, mountPlateCenterZ], radius = mountM5HoleDia / 2)
+  |> extrude(length = mountPlateThickness + 4)
+
+mountBlockChamferCutTop = startSketchOn(YZ)
+  |> startProfile(at = [caseWidth / 2, mountPlateCenterZ + mountPlateHeight / 2])
+  |> line(endAbsolute = [caseWidth / 2 + mountPlateThickness + 1, mountPlateCenterZ + mountPlateHeight / 2])
+  |> line(endAbsolute = [caseWidth / 2 + mountPlateThickness + 1, mountPlateCenterZ + mountPlateHeight / 2 - 10])
+  |> close()
+  |> extrude(length = mountPlateWidth + 4, symmetric = true)
+
+mountBlockChamferCutBot = startSketchOn(YZ)
+  |> startProfile(at = [caseWidth / 2, mountPlateCenterZ - mountPlateHeight / 2])
+  |> line(endAbsolute = [caseWidth / 2 + mountPlateThickness + 1, mountPlateCenterZ - mountPlateHeight / 2])
+  |> line(endAbsolute = [caseWidth / 2 + mountPlateThickness + 1, mountPlateCenterZ - mountPlateHeight / 2 + 10])
+  |> close()
+  |> extrude(length = mountPlateWidth + 4, symmetric = true)
+
+mountInterface = mountBlock - mountPocketCut - mountTopStrapCut - mountBottomStrapCut - mountM4Cut1 - mountM4Cut2 - mountM4Cut3 - mountM4Cut4 - mountM5Cut1 - mountM5Cut2 - mountBlockChamferCutTop - mountBlockChamferCutBot
+  |> appearance(color = baseColor, roughness = 76, metalness = 0)
+
+powerGlandBoss = startSketchOn(rightPlane)
+  |> circle(center = [powerEntryY, powerEntryZ], radius = powerGlandBossDia / 2)
+  |> extrude(length = powerGlandBossDepth + 8 + featureOverlap)
+  |> appearance(color = baseColor, roughness = 76, metalness = 0)
+
+baseWithStandoffs = baseShell | piStandoff1 | piStandoff2 | piStandoff3 | piStandoff4
+baseWithCamera = baseWithStandoffs
+baseWithMount = baseWithCamera | mountInterface
+baseWithFeatures = baseWithMount | powerGlandBoss
+
+cameraWallCut = startSketchOn(frontCutPlane)
+  |> rectangle(center = [0, cameraCenterZ], width = cameraClearWidth, height = cameraClearHeight)
+  |> extrude(length = wall + 8, symmetric = true)
+
+cameraPocketCut = startSketchOn(innerFrontPlane)
+  |> rectangle(corner = [-12.75, cameraCenterZ - 14.7], width = 25.5, height = 24.5)
+  |> extrude(length = 1.5)
+  |> hide()
+
+cameraCableSlot = startSketchOn(innerFrontPlane)
+  |> rectangle(corner = [-8, wall], width = 16, height = cameraCenterZ - 14.7 - wall)
+  |> extrude(length = 1.6)
+  |> hide()
+
+powerCableCut = startSketchOn(rightCutPlane)
+  |> circle(center = [powerEntryY, powerEntryZ], radius = powerGlandHoleDia / 2)
+  |> extrude(length = 100, symmetric = true)
+
+leftSnapPocketRaw = startSketchOn(XZ)
+  |> rectangle(corner = [leftPocketOuterX, snapPocketBottomZ], width = snapPocketDepth, height = snapPocketHeight)
+  |> extrude(length = snapPocketWidthY)
+  |> hide()
+
+rightSnapPocketRaw = startSketchOn(XZ)
+  |> rectangle(corner = [rightPocketInnerX, snapPocketBottomZ], width = snapPocketDepth, height = snapPocketHeight)
+  |> extrude(length = snapPocketWidthY)
+  |> hide()
+
+leftSnapPocketFront = clone(leftSnapPocketRaw)
+  |> translate(y = snapArmY + snapPocketWidthY / 2, global = true)
+
+leftSnapPocketBack = clone(leftSnapPocketRaw)
+  |> translate(y = -snapArmY + snapPocketWidthY / 2, global = true)
+
+rightSnapPocketFront = clone(rightSnapPocketRaw)
+  |> translate(y = snapArmY + snapPocketWidthY / 2, global = true)
+
+rightSnapPocketBack = clone(rightSnapPocketRaw)
+  |> translate(y = -snapArmY + snapPocketWidthY / 2, global = true)
+
+ventCut1 = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = 80, height = 4)
+  |> extrude(length = 20, symmetric = true)
+  |> hide()
+
+ventCut2 = startSketchOn(XY)
+  |> rectangle(center = [0, 15], width = 80, height = 4)
+  |> extrude(length = 20, symmetric = true)
+  |> hide()
+
+ventCut3 = startSketchOn(XY)
+  |> rectangle(center = [0, -15], width = 80, height = 4)
+  |> extrude(length = 20, symmetric = true)
+  |> hide()
+
+backVentCutTop = startSketchOn(backCutPlane)
+  |> rectangle(center = [0, mountTopSlotZ], width = 30, height = 4)
+  |> extrude(length = wall + 8, symmetric = true)
+
+backVentCutMiddle = startSketchOn(backCutPlane)
+  |> rectangle(center = [0, mountPlateCenterZ], width = 30, height = 4)
+  |> extrude(length = wall + 8, symmetric = true)
+
+backVentCutBottom = startSketchOn(backCutPlane)
+  |> rectangle(center = [0, mountBottomSlotZ], width = 30, height = 4)
+  |> extrude(length = wall + 8, symmetric = true)
+
+ventCuts = ventCut1 | ventCut2 | ventCut3 | backVentCutTop | backVentCutMiddle | backVentCutBottom
+
+enclosureBase = baseWithFeatures - cameraWallCut - cameraPocketCut - cameraCableSlot - powerCableCut - leftSnapPocketFront - leftSnapPocketBack - rightSnapPocketFront - rightSnapPocketBack - ventCuts
+  |> appearance(color = baseColor, roughness = 76, metalness = 0)
+
+lidPlate = startSketchOn(XY)
+  |> rectangle(corner = [-(caseLength / 2 + lidOverhang), -(caseWidth / 2 + lidOverhang)], width = caseLength + 2 * lidOverhang, height = caseWidth + 2 * lidOverhang)
+  |> extrude(length = lidThickness)
+
+lidLip = startSketchOn(offsetPlane(XY, offset = -lidLipHeight))
+  |> rectangle(center = [0, 0], width = lidLipOuterLength, height = lidLipOuterWidth)
+  |> subtract2d(tool = rectangle(center = [0, 0], width = lidLipOuterLength - 2 * lidLipBand, height = lidLipOuterWidth - 2 * lidLipBand))
+  |> extrude(length = lidLipHeight + featureOverlap)
+
+gasketGrooveCut = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = gasketOuterLength, height = gasketOuterWidth)
+  |> subtract2d(tool = rectangle(center = [0, 0], width = gasketInnerLength, height = gasketInnerWidth))
+  |> extrude(length = gasketGrooveDepth + featureOverlap)
+
+leftSnapReliefRaw = startSketchOn(XZ)
+  |> rectangle(corner = [leftReliefOuterX, snapReliefBottomZ], width = leftReliefWidthX, height = snapReliefTopZ - snapReliefBottomZ)
+  |> extrude(length = snapReliefWidthY)
+  |> hide()
+
+rightSnapReliefRaw = startSketchOn(XZ)
+  |> rectangle(corner = [rightReliefInnerX, snapReliefBottomZ], width = rightReliefWidthX, height = snapReliefTopZ - snapReliefBottomZ)
+  |> extrude(length = snapReliefWidthY)
+  |> hide()
+
+leftSnapReliefFront = clone(leftSnapReliefRaw)
+  |> translate(y = snapArmY + snapReliefWidthY / 2, global = true)
+
+leftSnapReliefBack = clone(leftSnapReliefRaw)
+  |> translate(y = -snapArmY + snapReliefWidthY / 2, global = true)
+
+rightSnapReliefFront = clone(rightSnapReliefRaw)
+  |> translate(y = snapArmY + snapReliefWidthY / 2, global = true)
+
+rightSnapReliefBack = clone(rightSnapReliefRaw)
+  |> translate(y = -snapArmY + snapReliefWidthY / 2, global = true)
+
+leftSnapArmRaw = startSketchOn(XZ)
+  |> startProfile(at = [leftArmRootInnerX, snapArmTopZ])
+  |> line(endAbsolute = [leftArmRootOuterX, snapArmTopZ])
+  |> line(endAbsolute = [leftArmRootOuterX, snapNubTopZ])
+  |> line(endAbsolute = [leftNubOuterX, snapNubTopZ])
+  |> line(endAbsolute = [leftNubOuterX, snapNubBottomZ])
+  |> line(endAbsolute = [leftArmRootOuterX, snapArmBottomZ])
+  |> line(endAbsolute = [leftArmRootInnerX, snapArmBottomZ])
+  |> close()
+  |> extrude(length = snapArmWidth)
+  |> appearance(color = lidColor, roughness = 62, metalness = 0)
+  |> hide()
+
+rightSnapArmRaw = startSketchOn(XZ)
+  |> startProfile(at = [rightArmRootInnerX, snapArmTopZ])
+  |> line(endAbsolute = [rightArmRootOuterX, snapArmTopZ])
+  |> line(endAbsolute = [rightArmRootOuterX, snapNubTopZ])
+  |> line(endAbsolute = [rightNubOuterX, snapNubTopZ])
+  |> line(endAbsolute = [rightNubOuterX, snapNubBottomZ])
+  |> line(endAbsolute = [rightArmRootOuterX, snapArmBottomZ])
+  |> line(endAbsolute = [rightArmRootInnerX, snapArmBottomZ])
+  |> close()
+  |> extrude(length = snapArmWidth)
+  |> appearance(color = lidColor, roughness = 62, metalness = 0)
+  |> hide()
+
+leftSnapArmFront = clone(leftSnapArmRaw)
+  |> translate(y = snapArmY + snapArmWidth / 2, global = true)
+
+leftSnapArmBack = clone(leftSnapArmRaw)
+  |> translate(y = -snapArmY + snapArmWidth / 2, global = true)
+
+rightSnapArmFront = clone(rightSnapArmRaw)
+  |> translate(y = snapArmY + snapArmWidth / 2, global = true)
+
+rightSnapArmBack = clone(rightSnapArmRaw)
+  |> translate(y = -snapArmY + snapArmWidth / 2, global = true)
+
+lidBase = lidPlate | lidLip
+
+lidWithRelief = lidBase - leftSnapReliefFront - leftSnapReliefBack - rightSnapReliefFront - rightSnapReliefBack
+
+lidWithSnaps = lidWithRelief | leftSnapArmFront | leftSnapArmBack | rightSnapArmFront | rightSnapArmBack
+
+lidPart = lidWithSnaps - gasketGrooveCut
+  |> appearance(color = lidColor, roughness = 62, metalness = 0)
+
+
+lidExploded = lidPart
+  |> translate(z = baseHeight + lidExplodeGap, global = true)
