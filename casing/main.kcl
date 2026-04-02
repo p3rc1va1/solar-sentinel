@@ -12,6 +12,9 @@ lidOverhang = 8
 lipClearance = 0.35
 lidExplodeGap = 0
 lidLipBand = 6
+lidRevealInset = 5
+lidRevealBand = 2.2
+lidRevealDepth = 0.8
 
 gasketGrooveWidth = 2.4
 gasketGrooveDepth = 1.8
@@ -29,6 +32,8 @@ piStandoffHeight = 6
 cameraCenterZ = 24
 cameraClearWidth = 12
 cameraClearHeight = 12
+cameraBezelBand = 2.4
+cameraBezelDepth = 2
 
 snapFitClearance = 0.5
 snapArmY = 38
@@ -60,7 +65,7 @@ mountM4HoleOffsetZ = 17
 mountM5HoleX = 46
 
 powerEntryY = -26
-powerEntryZ = 16
+powerEntryZ = 20
 powerGlandBossDia = 24
 powerGlandBossDepth = 3.5
 powerGlandHoleDia = 15.5
@@ -68,6 +73,20 @@ powerHoodWidth = 30
 powerHoodHeight = 4
 powerHoodDepth = 9
 powerHoodOffsetZ = 11
+
+sensorBodyWidth = 26.7
+sensorBodyHeight = 58.8
+sensorBodyDepth = 13.8
+sensorBodyClearance = 0.8
+sensorWallWindowWidth = 15.2
+sensorWallWindowHeight = 24
+sensorWallWindowCornerRadius = 1.2
+sensorBezelBand = 2.4
+sensorBezelDepth = 2
+sensorGlueFrameBand = 4
+sensorGlueFrameDepth = 2
+sensorMountY = 12
+sensorMountZ = 28
 
 baseColor = "#d7ddd8"
 lidColor = "#f0f2ef"
@@ -124,8 +143,18 @@ mountBlockDepth = mountBridgeDepth + wall / 2 - featureOverlap
 mountPocketWidth = mountPlateWidth - 2 * mountFrameSideWidth
 mountPocketHeight = mountPlateHeight - 2 * mountFrameTopWidth
 mountTopZ = mountPlateCenterZ + mountPlateHeight / 2
+piStandoffTopZ = wall - featureOverlap + piStandoffHeight + featureOverlap
+
+sensorPocketWidth = sensorBodyHeight + sensorBodyClearance
+sensorPocketHeight = sensorBodyWidth + sensorBodyClearance
+sensorGlueFrameOuterWidth = sensorPocketWidth + 2 * sensorGlueFrameBand
+sensorGlueFrameOuterHeight = sensorPocketHeight + 2 * sensorGlueFrameBand
 
 assert(mountTopZ, isLessThan = baseHeight - 1, error = "Rear mount too tall for lid clearance")
+assert(sensorMountZ + sensorGlueFrameOuterHeight / 2, isLessThan = baseHeight - 1, error = "Sensor mount too high")
+assert(sensorMountZ - sensorGlueFrameOuterHeight / 2, isGreaterThan = wall + 2, error = "Sensor mount too low")
+assert(lidRevealDepth, isLessThan = lidThickness - 1, error = "Lid reveal too deep")
+assert(powerEntryZ - powerGlandHoleDia / 2, isGreaterThan = piStandoffTopZ + 0.8, error = "Power entry intersects Pi standoff volume")
 
 frontPlane = offsetPlane(-XZ, offset = caseWidth / 2 - featureOverlap)
 frontCutPlane = offsetPlane(-XZ, offset = caseWidth / 2 - wall / 2)
@@ -135,6 +164,7 @@ backCutPlane = offsetPlane(XZ, offset = caseWidth / 2 - wall / 2)
 backMountPlane = offsetPlane(XZ, offset = caseWidth / 2 + mountGap - featureOverlap)
 rightPlane = offsetPlane(YZ, offset = caseLength / 2 - featureOverlap)
 rightCutPlane = offsetPlane(YZ, offset = caseLength / 2 - wall / 2)
+innerRightPlaneInward = offsetPlane(-YZ, offset = caseLength / 2 - wall + featureOverlap)
 innerFloorPlane = offsetPlane(XY, offset = wall - featureOverlap)
 
 baseOuter = startSketchOn(XY)
@@ -226,10 +256,27 @@ powerGlandBoss = startSketchOn(rightPlane)
   |> extrude(length = powerGlandBossDepth + 8 + featureOverlap)
   |> appearance(color = baseColor, roughness = 76, metalness = 0)
 
+sensorGlueFrame = startSketchOn(innerRightPlaneInward)
+  |> rectangle(center = [sensorMountY, sensorMountZ], width = sensorGlueFrameOuterWidth, height = sensorGlueFrameOuterHeight)
+  |> subtract2d(tool = rectangle(center = [sensorMountY, sensorMountZ], width = sensorPocketWidth, height = sensorPocketHeight))
+  |> extrude(length = sensorGlueFrameDepth)
+
+sensorBezel = startSketchOn(rightPlane)
+  |> rectangle(center = [sensorMountY, sensorMountZ], width = sensorWallWindowWidth + 2 * sensorBezelBand, height = sensorWallWindowHeight + 2 * sensorBezelBand)
+  |> subtract2d(tool = rectangle(center = [sensorMountY, sensorMountZ], width = sensorWallWindowWidth, height = sensorWallWindowHeight))
+  |> extrude(length = sensorBezelDepth)
+  |> appearance(color = baseColor, roughness = 76, metalness = 0)
+
+cameraBezel = startSketchOn(frontPlane)
+  |> rectangle(center = [0, cameraCenterZ], width = cameraClearWidth + 2 * cameraBezelBand, height = cameraClearHeight + 2 * cameraBezelBand)
+  |> subtract2d(tool = rectangle(center = [0, cameraCenterZ], width = cameraClearWidth, height = cameraClearHeight))
+  |> extrude(length = cameraBezelDepth)
+  |> appearance(color = baseColor, roughness = 76, metalness = 0)
+
 baseWithStandoffs = baseShell | piStandoff1 | piStandoff2 | piStandoff3 | piStandoff4
 baseWithCamera = baseWithStandoffs
 baseWithMount = baseWithCamera | mountInterface
-baseWithFeatures = baseWithMount | powerGlandBoss
+baseWithFeatures = baseWithMount | powerGlandBoss | sensorGlueFrame | sensorBezel | cameraBezel
 
 cameraWallCut = startSketchOn(frontCutPlane)
   |> rectangle(center = [0, cameraCenterZ], width = cameraClearWidth, height = cameraClearHeight)
@@ -248,6 +295,10 @@ cameraCableSlot = startSketchOn(innerFrontPlane)
 powerCableCut = startSketchOn(rightCutPlane)
   |> circle(center = [powerEntryY, powerEntryZ], radius = powerGlandHoleDia / 2)
   |> extrude(length = 100, symmetric = true)
+
+sensorWallWindowCut = startSketchOn(rightCutPlane)
+  |> rectangle(center = [sensorMountY, sensorMountZ], width = sensorWallWindowWidth, height = sensorWallWindowHeight)
+  |> extrude(length = wall + 10, symmetric = true)
 
 leftSnapPocketRaw = startSketchOn(XZ)
   |> rectangle(corner = [leftPocketOuterX, snapPocketBottomZ], width = snapPocketDepth, height = snapPocketHeight)
@@ -300,12 +351,17 @@ backVentCutBottom = startSketchOn(backCutPlane)
 
 ventCuts = ventCut1 | ventCut2 | ventCut3 | backVentCutTop | backVentCutMiddle | backVentCutBottom
 
-enclosureBase = baseWithFeatures - cameraWallCut - cameraPocketCut - cameraCableSlot - powerCableCut - leftSnapPocketFront - leftSnapPocketBack - rightSnapPocketFront - rightSnapPocketBack - ventCuts
+enclosureBase = baseWithFeatures - cameraWallCut - cameraPocketCut - cameraCableSlot - powerCableCut - sensorWallWindowCut - leftSnapPocketFront - leftSnapPocketBack - rightSnapPocketFront - rightSnapPocketBack - ventCuts
   |> appearance(color = baseColor, roughness = 76, metalness = 0)
 
 lidPlate = startSketchOn(XY)
   |> rectangle(corner = [-(caseLength / 2 + lidOverhang), -(caseWidth / 2 + lidOverhang)], width = caseLength + 2 * lidOverhang, height = caseWidth + 2 * lidOverhang)
   |> extrude(length = lidThickness)
+
+lidRevealCut = startSketchOn(XY)
+  |> rectangle(corner = [-(caseLength / 2 + lidOverhang - lidRevealInset), -(caseWidth / 2 + lidOverhang - lidRevealInset)], width = caseLength + 2 * lidOverhang - 2 * lidRevealInset, height = caseWidth + 2 * lidOverhang - 2 * lidRevealInset)
+  |> subtract2d(tool = rectangle(corner = [-(caseLength / 2 + lidOverhang - lidRevealInset - lidRevealBand), -(caseWidth / 2 + lidOverhang - lidRevealInset - lidRevealBand)], width = caseLength + 2 * lidOverhang - 2 * (lidRevealInset + lidRevealBand), height = caseWidth + 2 * lidOverhang - 2 * (lidRevealInset + lidRevealBand)))
+  |> extrude(length = lidRevealDepth + featureOverlap)
 
 lidLip = startSketchOn(offsetPlane(XY, offset = -lidLipHeight))
   |> rectangle(center = [0, 0], width = lidLipOuterLength, height = lidLipOuterWidth)
@@ -377,7 +433,7 @@ rightSnapArmFront = clone(rightSnapArmRaw)
 rightSnapArmBack = clone(rightSnapArmRaw)
   |> translate(y = -snapArmY + snapArmWidth / 2, global = true)
 
-lidBase = lidPlate | lidLip
+lidBase = (lidPlate - lidRevealCut) | lidLip
 
 lidWithRelief = lidBase - leftSnapReliefFront - leftSnapReliefBack - rightSnapReliefFront - rightSnapReliefBack
 
