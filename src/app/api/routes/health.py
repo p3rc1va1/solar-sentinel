@@ -1,17 +1,22 @@
 """Health and system status endpoint."""
 
 import psutil
+import random
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_settings
 from app.db.database import Database
+from app.config import Settings
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check(db: Database = Depends(get_db)):
+async def health_check(
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
     """System health overview."""
     # CPU temperature (Linux / RPi)
     try:
@@ -19,6 +24,9 @@ async def health_check(db: Database = Depends(get_db)):
             cpu_temp = int(f.read().strip()) / 1000
     except (FileNotFoundError, ValueError):
         cpu_temp = None
+
+    if settings.demo_mode:
+        cpu_temp = round(random.uniform(42.0, 46.5), 1)
 
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")

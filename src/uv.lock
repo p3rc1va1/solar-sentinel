@@ -4023,7 +4023,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "python-telegram-bot", specifier = ">=21.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "ultralytics", specifier = ">=8.3.0" },
+    { name = "ultralytics", specifier = ">=8.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 provides-extras = ["dev"]

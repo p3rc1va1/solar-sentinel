@@ -337,9 +337,16 @@ scp best.pt pi@<pi-ip>:~/solar-sentinel/src/data/models/
 
 ### 4. Run
 
+To run the application normally:
 ```bash
 cd src
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+To run the application in **Demo Mode** (which populates a separate database with fake detections and AI reports so you can explore the UI without needing a live camera or model):
+```bash
+cd src
+uv run python -m app.main --demo --host 0.0.0.0 --port 8000
 ```
 
 The API is now live at `http://<pi-ip>:8000`. Key endpoints:
@@ -377,7 +384,7 @@ The API is now live at `http://<pi-ip>:8000`. Key endpoints:
 - [ ] MCP server for agent tool access
 - [ ] DHT22 temperature/humidity sensor integration
 - [ ] Live view with real-time YOLO overlay (MJPEG)
-- [ ] Web dashboard UI
+- [x] Web dashboard UI
 - [ ] Gemini model auto-discovery and fallback chain
 
 ---

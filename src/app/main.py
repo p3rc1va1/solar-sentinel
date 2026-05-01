@@ -11,6 +11,7 @@ from app.api.deps import init_deps
 from app.api.routes import camera, detections, health, reports, settings
 from app.config import Settings
 from app.core.camera import Camera
+from app.core.demo import populate_demo_data
 from app.core.detector import Detector
 from app.core.triage import TriageAgent
 from app.db.database import Database
@@ -36,8 +37,12 @@ async def lifespan(app: FastAPI):
     s.ensure_dirs()
 
     # Database
-    db = Database(s.data_dir / "solar_sentinel.db")
+    db_file = "solar_sentinel_demo.db" if s.demo_mode else "solar_sentinel.db"
+    db = Database(s.data_dir / db_file)
     await db.connect()
+    
+    if s.demo_mode:
+        await populate_demo_data(db)
 
     # Camera
     cam = Camera(resolution=(s.yolo_input_size, s.yolo_input_size))
@@ -103,3 +108,20 @@ app.include_router(settings.router)
 ui_dir = BASE_DIR / "ui"
 if ui_dir.exists():
     app.mount("/", StaticFiles(directory=str(ui_dir), html=True), name="ui")
+
+if __name__ == "__main__":
+    import argparse
+    import os
+    import uvicorn
+    
+    parser = argparse.ArgumentParser(description="Solar Sentinel")
+    parser.add_argument("--demo", action="store_true", help="Run with fake demo data in a separate database")
+    parser.add_argument("--host", default="0.0.0.0", help="Host IP")
+    parser.add_argument("--port", type=int, default=8000, help="Port")
+    args = parser.parse_args()
+    
+    if args.demo:
+        os.environ["DEMO_MODE"] = "1"
+        
+    uvicorn.run("app.main:app", host=args.host, port=args.port)
+

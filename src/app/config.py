@@ -17,6 +17,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- Demo Mode ---
+    demo_mode: bool = False
+
     # --- Gemini API ---
     gemini_api_key: str = ""
 
