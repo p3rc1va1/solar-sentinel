@@ -94,7 +94,7 @@ class TriageAgent:
             if det.confidence < confidence_medium:
                 continue
 
-            if det.class_name == "clean":
+            if det.class_name == "healthy":
                 continue
 
             det_box = {

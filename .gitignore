@@ -35,3 +35,6 @@
 
 # uv
 **/.python-version
+
+src/notebooks/datasets
+src/notebooks/runs
