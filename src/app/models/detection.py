@@ -19,12 +19,9 @@ class Urgency(str, Enum):
 
 
 class DefectClass(str, Enum):
-    PHYSICAL_DAMAGE = "physical_damage"
-    SOILING = "soiling"
-    BIOLOGICAL = "biological"
-    ENVIRONMENTAL = "environmental"
-    ELECTRICAL = "electrical"
-    CLEAN = "clean"
+    DAMAGE = "damage"
+    BLOCKAGE = "blockage"
+    HEALTHY = "healthy"
 
 
 class BoundingBox(BaseModel):

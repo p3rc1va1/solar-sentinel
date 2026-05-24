@@ -1,5 +1,9 @@
 """FastAPI dependency injection."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from app.config import Settings
 from app.core.camera import Camera
 from app.core.detector import Detector
@@ -8,6 +12,10 @@ from app.db.database import Database
 from app.services.gemini import GeminiClient
 from app.services.notifications import NotificationService
 from app.services.weather import WeatherService
+
+if TYPE_CHECKING:
+    from app.core.scheduler import CaptureScheduler
+    from app.core.sensor import DHTSensor
 
 # Singletons — initialized in main.py lifespan
 _db: Database | None = None
@@ -18,6 +26,8 @@ _triage: TriageAgent | None = None
 _gemini: GeminiClient | None = None
 _notifications: NotificationService | None = None
 _weather: WeatherService | None = None
+_scheduler: CaptureScheduler | None = None
+_sensor: DHTSensor | None = None
 
 
 def init_deps(
@@ -29,9 +39,11 @@ def init_deps(
     gemini: GeminiClient,
     notifications: NotificationService,
     weather: WeatherService,
+    scheduler: CaptureScheduler | None = None,
+    sensor: DHTSensor | None = None,
 ) -> None:
     """Register singleton instances (called from lifespan)."""
-    global _db, _settings, _camera, _detector, _triage, _gemini, _notifications, _weather
+    global _db, _settings, _camera, _detector, _triage, _gemini, _notifications, _weather, _scheduler, _sensor
     _db = db
     _settings = settings
     _camera = camera
@@ -40,6 +52,8 @@ def init_deps(
     _gemini = gemini
     _notifications = notifications
     _weather = weather
+    _scheduler = scheduler
+    _sensor = sensor
 
 
 def _get(name: str, value):
@@ -78,3 +92,11 @@ def get_notifications() -> NotificationService:
 
 def get_weather() -> WeatherService:
     return _get("WeatherService", _weather)
+
+
+def get_scheduler() -> CaptureScheduler:
+    return _get("Scheduler", _scheduler)
+
+
+def get_sensor() -> DHTSensor:
+    return _get("Sensor", _sensor)

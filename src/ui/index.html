@@ -8,8 +8,54 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
+    <!-- Toast container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Detection detail modal -->
+    <div class="modal-overlay" id="detectionModal">
+        <div class="modal-content">
+            <button class="modal-close" id="modalClose">&times;</button>
+            <h2 id="modalTitle">Detection Detail</h2>
+            <div class="modal-body">
+                <div class="modal-image-wrap">
+                    <img id="modalImage" src="" alt="Detection image" class="modal-image">
+                </div>
+                <div class="modal-info">
+                    <div class="modal-field">
+                        <span class="modal-label">Class</span>
+                        <span class="modal-value" id="modalClass">—</span>
+                    </div>
+                    <div class="modal-field">
+                        <span class="modal-label">Confidence</span>
+                        <span class="modal-value" id="modalConf">—</span>
+                    </div>
+                    <div class="modal-field">
+                        <span class="modal-label">Panel</span>
+                        <span class="modal-value" id="modalPanel">—</span>
+                    </div>
+                    <div class="modal-field">
+                        <span class="modal-label">Time</span>
+                        <span class="modal-value" id="modalTime">—</span>
+                    </div>
+                    <div class="modal-field">
+                        <span class="modal-label">Bounding Box</span>
+                        <span class="modal-value" id="modalBbox">—</span>
+                    </div>
+                    <div class="modal-field">
+                        <span class="modal-label">Report</span>
+                        <span class="modal-value" id="modalReport">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app">
         <!-- Sidebar Navigation -->
         <nav class="sidebar" id="sidebar">
@@ -34,23 +80,23 @@
             <ul class="nav-links">
                 <li><a href="#" class="nav-link active" data-page="dashboard">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                    Dashboard
+                    <span>Dashboard</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-page="detections">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                    Detections
+                    <span>Detections</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-page="reports">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    Reports
+                    <span>Reports</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-page="live">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                    Live Feed
+                    <span>Live Feed</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-page="settings">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                    Settings
+                    <span>Settings</span>
                 </a></li>
             </ul>
             <div class="sidebar-footer">
@@ -94,6 +140,32 @@
                         <div class="stat-value" id="statApi">--</div>
                         <div class="stat-sub">Gemini API</div>
                     </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Last Capture</div>
+                        <div class="stat-value" id="statLastCapture" style="font-size:1.1rem;">—</div>
+                        <div class="stat-sub" id="statLastClass">No captures yet</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Sensor</div>
+                        <div class="stat-value" id="statSensor" style="font-size:1.1rem;">—</div>
+                        <div class="stat-sub" id="statHumidity">DHT22</div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="content-grid">
+                    <div class="card">
+                        <h2>Detection Trend (7 Days)</h2>
+                        <div class="chart-container">
+                            <canvas id="chartTrend"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Class Distribution</h2>
+                        <div class="chart-container chart-sm">
+                            <canvas id="chartClasses"></canvas>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="content-grid">
@@ -134,6 +206,7 @@
                             <tbody></tbody>
                         </table>
                     </div>
+                    <div class="pagination" id="detectionsPagination"></div>
                 </div>
             </section>
 
@@ -149,6 +222,7 @@
                             <tbody></tbody>
                         </table>
                     </div>
+                    <div class="pagination" id="reportsPagination"></div>
                 </div>
                 <div class="card" id="reportDetail" style="display:none;">
                     <h2>Report Detail</h2>
@@ -158,7 +232,15 @@
 
             <!-- Live Feed Page -->
             <section class="page" id="page-live">
-                <header class="page-header"><h1>Live Camera Feed</h1></header>
+                <header class="page-header">
+                    <h1>Live Camera Feed</h1>
+                    <div class="feed-controls">
+                        <label class="toggle-inline">
+                            <input type="checkbox" id="overlayToggle">
+                            <span>YOLO Overlay</span>
+                        </label>
+                    </div>
+                </header>
                 <div class="card feed-card">
                     <img id="liveFeed" src="" alt="Camera feed" class="live-feed-img">
                     <p class="feed-note">MJPEG stream from Pi Camera Module 3 Wide</p>

@@ -28,8 +28,9 @@ class TestEnums:
         assert Urgency.ROUTINE == "ROUTINE"
 
     def test_defect_class_values(self):
-        assert DefectClass.CLEAN == "clean"
-        assert DefectClass.SOILING == "soiling"
+        assert DefectClass.HEALTHY == "healthy"
+        assert DefectClass.BLOCKAGE == "blockage"
+        assert DefectClass.DAMAGE == "damage"
 
 
 class TestDetectionModels:
@@ -41,9 +42,9 @@ class TestDetectionModels:
     def test_detection_create(self):
         dc = DetectionCreate(
             image_path="/tmp/img.jpg",
-            defect_class=DefectClass.SOILING,
+            defect_class=DefectClass.BLOCKAGE,
             confidence=0.85,
-            bbox=BoundingBox(x1=0, y1=0, x2=50, y2=50, confidence=0.85, class_name="soiling"),
+            bbox=BoundingBox(x1=0, y1=0, x2=50, y2=50, confidence=0.85, class_name="blockage"),
         )
         assert dc.panel_id == "panel-1"
 
@@ -51,9 +52,9 @@ class TestDetectionModels:
         with pytest.raises(ValidationError):
             DetectionCreate(
                 image_path="/tmp/img.jpg",
-                defect_class=DefectClass.SOILING,
+                defect_class=DefectClass.BLOCKAGE,
                 confidence=1.5,
-                bbox=BoundingBox(x1=0, y1=0, x2=50, y2=50, confidence=0.85, class_name="soiling"),
+                bbox=BoundingBox(x1=0, y1=0, x2=50, y2=50, confidence=0.85, class_name="blockage"),
             )
 
 

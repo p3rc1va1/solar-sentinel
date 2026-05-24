@@ -28,13 +28,13 @@ Solar Sentinel is an end-to-end autonomous maintenance system for solar panels. 
 
 ### Key Features
 
-- 🎯 **3-Class Detection** — `damage` · `blockage` · `healthy`
+- 🎯 **Binary Detection** — `defect` (damage or blockage) · `healthy` — class granularity resolved by the agentic layer
 - 🤖 **Agentic Analysis** — Multi-agent pipeline (Analyst → Report Writer → QA Reviewer)
-- 🔧 **MCP Tool Integration** — Agents access weather, time, and web search tools *(planned)*
-- 🌡️ **Environmental Context** — Temperature/humidity sensor + weather API enrich reports *(planned)*
-- 📱 **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached imagesGitHub open-source project
+- 🔧 **MCP Tool Integration** — Agents access weather, time, and web search tools *(not yet implemented)*
+- 🌡️ **Environmental Context** — Temperature/humidity sensor (DHT22) + Open-Meteo weather API enrich reports
+- 📱 **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached images
 - 🔄 **Adaptive Scheduling** — Capture frequency adapts to detection results
-- 🌙 **Daylight-Aware** — Only captures during daylight hours
+- 🌙 **Daylight-Aware** — Only captures during daylight hours (06:00–20:00, hardcoded)
 - 🛡️ **Smart Triage** — Rule-based filtering (deduplication, transient rejection, exposure check) before any LLM call
 - 🌐 **Web Dashboard** — FastAPI backend with REST API and static UI
 
@@ -64,7 +64,7 @@ The system can be triggered in three ways:
 |:--------|:------------|
 | **Periodic** | Adaptive scheduler captures frames every *N* minutes (default: 15 min, adjusts based on results) |
 | **Manual** | User triggers a capture via the web UI or REST API |
-| **Sensor** | Temperature/humidity threshold exceeded *(planned)* |
+| **Sensor** | DHT22 thresholds: temp >35°C (PV efficiency drop), temp <0°C (icing risk), humidity >85% (particulate cementation) *(not yet implemented — sensor is read for context only)* |
 
 ### Step 2 · Image Capture
 
@@ -72,13 +72,14 @@ The **Camera Module 3 Wide** captures a still frame at 640×640 resolution. Befo
 
 ### Step 3 · YOLO26 Nano Inference
 
-The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN format for ARM optimization). The model outputs bounding boxes with class labels and confidence scores:
+The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN format for ARM optimization). Per the thesis design, the model acts as a **binary smart trigger** — classifying frames as `defect` or `healthy` — because defect sub-type analysis (damage vs. blockage) is delegated to the agentic pipeline's VLM capabilities, which provides better semantic understanding. The model outputs bounding boxes with confidence scores:
 
-| Class | What It Detects | Example |
-|:------|:----------------|:--------|
-| `damage` | Cracks, broken cells, electrical burn marks, physical deformation | Hail damage, snail trails |
-| `blockage` | Dust, bird droppings, snow, leaves, debris | Soiling, partial shading |
-| `healthy` | Clean panel surface, no defects | Normal operation |
+| Class | What It Detects | Action |
+|:------|:----------------|:-------|
+| `defect` | Any anomaly: cracks, burns, soiling, debris, snow | Routes to confidence-based pipeline |
+| `healthy` | Clean panel surface — no anomalies | No action, logs clean frame |
+
+> **Note:** The current code still trains with `damage` / `blockage` / `healthy` classes. The thesis describes the intended final design as binary (`defect` / `healthy`). Recent commits reflect this migration in progress.
 
 ### Step 4 · Confidence-Based Routing
 
@@ -90,7 +91,7 @@ Detection Confidence
         ├── ≥ 70%  ──→  HIGH: Trigger CrewAI pipeline immediately
         │                 ↳ Increase capture frequency to every 5 min
         │
-        ├── 45-70% ──→  MEDIUM: Queue for hourly digest
+        ├── 45-70% ──→  MEDIUM: Log to database (hourly digest not yet implemented)
         │
         └── < 45%  ──→  LOW: Log to database only, no action
                          ↳ If 6+ consecutive clean frames, reduce
@@ -110,7 +111,7 @@ Before any LLM call, a **rule-based triage agent** filters detections:
 When a detection passes triage, the system enriches it with context:
 
 - **Weather** — Current conditions via [Open-Meteo](https://open-meteo.com/) (temperature, precipitation, UV index)
-- **Temperature & Humidity** — Local sensor data from the Adafruit AM2302/DHT22 *(planned)*
+- **Temperature & Humidity** — Local sensor data from the Adafruit AM2302/DHT22 (reads in background; included in report context)
 - **Historical** — Previous detections from the SQLite database for trend analysis
 
 ### Step 7 · CrewAI Agentic Pipeline
@@ -118,31 +119,35 @@ When a detection passes triage, the system enriches it with context:
 The enriched detection triggers a **sequential multi-agent pipeline** powered by Google Gemini:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CrewAI Pipeline                           │
-│                                                             │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
-│  │   Defect      │   │   Report     │   │     QA       │    │
-│  │   Analyst     │──→│   Writer     │──→│   Reviewer   │    │
-│  │              │   │              │   │              │    │
-│  │ • Severity   │   │ • Markdown   │   │ • Accuracy   │    │
-│  │ • Root cause │   │   report     │   │ • Score /10  │    │
-│  │ • Urgency    │   │ • Plain      │   │ • Approve /  │    │
-│  │ • Trend      │   │   language   │   │   reject     │    │
-│  └──────────────┘   └──────────────┘   └──────────────┘    │
-│                                                             │
-│  MCP Server (planned)                                       │
-│  ├── 🌐 Web Search Tool                                    │
-│  ├── 🕐 Time Tool                                          │
-│  └── ⛅ Weather Tool                                       │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    CrewAI Pipeline                                │
+│                                                                  │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐         │
+│  │   Defect      │   │ Maintenance  │   │    Critic    │  ┌────┐ │
+│  │   Analyst     │──→│   Planner    │──→│    Agent     │─→│Rpt.│ │
+│  │  (VLM input) │   │  (MCP tools) │   │ (QA + web)  │  └────┘ │
+│  └──────────────┘   └──────────────┘   └──────────────┘         │
+│  ← ─ ─ ─ ─ thesis design (4 agents) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ → │
+│                                                                  │
+│  Current code: Analyst → Report Writer → QA Reviewer (3 agents) │
+│                                                                  │
+│  MCP Server (not yet implemented)                                │
+│  ├── 🌐 Web Search / Fetch Tool                                 │
+│  ├── 🕐 Time Tool                                               │
+│  └── ⛅ Weather Forecast Tool                                   │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+**Thesis design (4 agents):**
 
 | Agent | Role | What It Does |
 |:------|:-----|:-------------|
-| **Defect Analyst** | PV systems engineer | Classifies severity (CRITICAL/WARNING/INFO), identifies root cause, determines urgency, analyzes trends |
-| **Report Writer** | Technical writer | Translates analysis into clear, actionable maintenance reports for field technicians |
-| **QA Reviewer** | Quality engineer | Validates report accuracy, catches hallucinations, scores quality (1-10), approves or rejects |
+| **Defect Analyst** | PV systems engineer | Uses VLM to inspect the image, confirms detection isn't a false positive (shadow, animal), classifies severity |
+| **Maintenance Planner** | Field operations | Cross-references findings with weather forecast, time/daylight data, and web search to recommend context-aware actions |
+| **Critic Agent** | Quality assurance | Fact-checks recommendations against web sources and fixed logic rules (e.g., "don't recommend replacement unless loss >20%") |
+| **Report Writer** | Technical writer | Compiles all agent outputs into a user-friendly email/Telegram report |
+
+**Current code (3 agents — `agents/crew.py`):** Analyst → Report Writer → QA Reviewer. The Maintenance Planner is not yet implemented; MCP tools are not wired.
 
 ### Step 8 · Notification Delivery
 
@@ -180,16 +185,18 @@ The scheduler then adapts its capture interval based on recent history and enter
 | **SBC** | Raspberry Pi 5 (8GB) | Main compute — runs YOLO + CrewAI |
 | **Cooling** | Raspberry Pi Active Cooler | Thermal management for sustained inference |
 | **Camera** | Camera Module 3 Wide | 120° FOV, 12MP, auto-focus |
-| **Sensor** | Adafruit AM2302 (DHT22) | Ambient temperature & humidity *(planned)* |
-| **Enclosure** | Custom 3D-printed (PLA/PETG) | IP-rated outdoor housing |
+| **Sensor** | Adafruit AM2302 (DHT22) | Ambient temperature & humidity |
+| **Enclosure** | Custom 3D-printed (ASA) | Weather-resistant outdoor housing (ASA chosen for 105°C glass transition temp and UV resistance) |
 
-### Enclosure Features
+### Enclosure Specs & Features
 
-- 🔲 Camera lens port with rain shield
-- 🌬️ Rear ventilation slots for active cooling airflow
-- 📡 Internal ribbon cable channel for camera connection
-- 🔌 Side cutouts for USB-C power and Ethernet
-- 🔩 M2.5 standoff mounting for the Pi 5
+- **Material:** ASA (Acrylonitrile Styrene Acrylate) — UV-resistant, 105°C glass transition temperature
+- **Dimensions:** 179 mm × 56 mm × 133 mm · **Weight:** ~290 g total assembly
+- **Wall thickness:** 3.2 mm · **Lid overhang:** 8 mm rain guard
+- 🔲 Tightly fitted camera lens port and DHT22 sensor mount
+- 🌬️ Ventilation slots: 30×4 mm rear panel + 80×4 mm bottom panel (natural convection)
+- 🔒 Gasket groove with snapping-arm lid seal; 15.5 mm cable gland for power
+- 🔩 M2.5 Pan Head (ISO 7045) standoffs for Pi 5 mounting
 
 ---
 
@@ -223,40 +230,52 @@ solar-sentinel/
 │
 ├── src/                             # Application source
 │   ├── app/
-│   │   ├── main.py                  # FastAPI entry point + lifespan
+│   │   ├── main.py                  # FastAPI entry point + lifespan + HIGH detection callback
 │   │   ├── config.py                # Pydantic settings (from .env)
 │   │   │
 │   │   ├── core/                    # Core pipeline
-│   │   │   ├── camera.py            # Pi Camera / stub adapter
+│   │   │   ├── camera.py            # Pi Camera / stub adapter + MJPEG stream
 │   │   │   ├── detector.py          # YOLO26n inference wrapper
-│   │   │   ├── triage.py            # Rule-based detection filter
-│   │   │   └── scheduler.py         # Adaptive capture scheduler
+│   │   │   ├── triage.py            # Rule-based filter (quality, dedup, confirmation)
+│   │   │   ├── scheduler.py         # Daylight-aware adaptive capture scheduler
+│   │   │   ├── sensor.py            # DHT22 temperature/humidity sensor + stub
+│   │   │   └── demo.py              # Demo mode — populates DB with fake data
 │   │   │
 │   │   ├── agents/                  # CrewAI agentic layer
-│   │   │   ├── crew.py              # Crew orchestration
+│   │   │   ├── crew.py              # Crew orchestration (Analyst → Writer → QA)
 │   │   │   ├── model_router.py      # Gemini model discovery + ranking
 │   │   │   └── config/
-│   │   │       ├── agents.yaml      # Agent role definitions
-│   │   │       └── tasks.yaml       # Task descriptions
+│   │   │       ├── agents.yaml      # Agent role / goal / backstory definitions
+│   │   │       └── tasks.yaml       # Task prompts with {placeholder} format strings
 │   │   │
 │   │   ├── services/                # External integrations
-│   │   │   ├── gemini.py            # Google Gemini client
-│   │   │   ├── notifications.py     # Email + Telegram delivery
+│   │   │   ├── gemini.py            # Google Gemini client + model fallback
+│   │   │   ├── notifications.py     # Email (SMTP) + Telegram delivery
 │   │   │   └── weather.py           # Open-Meteo weather service
 │   │   │
 │   │   ├── api/                     # REST API
-│   │   │   ├── deps.py              # Dependency injection
+│   │   │   ├── deps.py              # Dependency injection (singleton registry)
 │   │   │   └── routes/
-│   │   │       ├── health.py        # System health endpoint
-│   │   │       ├── camera.py        # Capture control
-│   │   │       ├── detections.py    # Detection history
-│   │   │       ├── reports.py       # Generated reports
-│   │   │       └── settings.py      # Runtime config
+│   │   │       ├── health.py        # GET /health — system stats + Gemini usage
+│   │   │       ├── camera.py        # GET /camera/feed (MJPEG), POST /camera/capture
+│   │   │       ├── detections.py    # GET /detections, GET /detections/{id}
+│   │   │       ├── reports.py       # GET /reports, GET /reports/{id}
+│   │   │       ├── images.py        # GET /images/{filename} — serve detection images
+│   │   │       ├── sensor.py        # GET /sensor — live DHT22 reading
+│   │   │       └── settings.py      # GET/PUT /settings — runtime config persisted to DB
 │   │   │
 │   │   ├── db/                      # Database layer
-│   │   │   └── database.py          # Async SQLite operations
+│   │   │   └── database.py          # Async SQLite (aiosqlite) — all CRUD operations
 │   │   │
 │   │   └── models/                  # Pydantic schemas
+│   │       ├── detection.py         # DetectionRecord, BoundingBox, enums
+│   │       ├── report.py            # Report models
+│   │       └── settings.py          # AllSettings, NotificationSettings, etc.
+│   │
+│   ├── ui/                          # Web dashboard (no build step — plain HTML/JS)
+│   │   ├── index.html               # SPA shell — Dashboard, Detections, Reports, Live, Settings
+│   │   ├── app.js                   # All dashboard JS (fetch, charts, pagination)
+│   │   └── style.css                # Styles
 │   │
 │   ├── notebooks/
 │   │   └── train_yolo26n.ipynb      # 📓 Colab training notebook
@@ -349,43 +368,85 @@ cd src
 uv run python -m app.main --demo --host 0.0.0.0 --port 8000
 ```
 
-The API is now live at `http://<pi-ip>:8000`. Key endpoints:
+The web dashboard is available at `http://<pi-ip>:8000` on the local network. For remote access from any network, the thesis recommends adding **[Tailscale](https://tailscale.com/)** — no port-forwarding required, everything stays local. Key API endpoints:
 
 | Endpoint | Method | Description |
 |:---------|:-------|:------------|
-| `/api/health` | GET | System status, model info, uptime |
-| `/api/camera/capture` | POST | Trigger manual capture + detection |
-| `/api/detections` | GET | Detection history |
-| `/api/reports` | GET | Generated maintenance reports |
-| `/api/settings` | GET/PUT | Runtime configuration |
+| `/health` | GET | System stats (CPU temp, memory, disk) + Gemini usage |
+| `/camera/feed` | GET | MJPEG live stream (`?overlay=true` for YOLO boxes) |
+| `/camera/capture` | POST | Trigger immediate capture + detection (rate-limited 10 s) |
+| `/detections` | GET | Detection history with pagination |
+| `/reports` | GET | Generated maintenance reports |
+| `/sensor` | GET | Live DHT22 temperature & humidity reading |
+| `/settings` | GET/PUT | Runtime configuration (persisted to DB) |
+| `/images/{filename}` | GET | Serve a detection image by filename |
 
 ---
 
 ## 📊 Detection Classes
 
-| Class | ID | Triggers Alert | What the Model Detects |
-|:------|:---|:---------------|:-----------------------|
-| **damage** | 0 | ✅ → CrewAI | Cracks, broken cells, electrical burn marks, snail trails, physical deformation |
-| **blockage** | 1 | ✅ → CrewAI | Dust accumulation, bird droppings, snow coverage, leaves, debris |
-| **healthy** | 2 | ❌ | Clean panel surface — no action needed |
+The thesis design uses **binary detection** — YOLO acts only as a trigger, not a classifier. The agentic pipeline (VLM) determines the defect type. The current code still uses 3 classes (migration in progress per recent commits).
+
+| Class | Thesis Design | Current Code | Triggers Pipeline |
+|:------|:-------------|:-------------|:------------------|
+| **defect** | ✅ Intended final | migration in progress | ✅ → CrewAI |
+| **damage** | ❌ delegated to agents | ✅ active in code | ✅ → CrewAI |
+| **blockage** | ❌ delegated to agents | ✅ active in code | ✅ → CrewAI |
+| **healthy** | ✅ keep | ✅ active in code | ❌ no action |
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Status
 
-- [x] YOLO26n model training pipeline
-- [x] CrewAI multi-agent analysis
-- [x] Email & Telegram notifications
-- [x] Adaptive capture scheduling
-- [x] Rule-based triage agent
-- [x] Weather context enrichment
-- [x] 3D-printed enclosure design
-- [x] Colab training notebook
-- [ ] MCP server for agent tool access
-- [ ] DHT22 temperature/humidity sensor integration
-- [ ] Live view with real-time YOLO overlay (MJPEG)
-- [x] Web dashboard UI
-- [ ] Gemini model auto-discovery and fallback chain
+### ✅ Implemented
+
+| Component | Notes |
+|:----------|:------|
+| YOLO26n training pipeline | Colab notebook — trains, exports to NCNN |
+| YOLO26n inference | ultralytics wrapper; stub when model/library absent |
+| Rule-based triage agent | Frame quality check, IoU deduplication, 2-hit confirmation |
+| Adaptive capture scheduler | Daylight-aware (hardcoded 06:00–20:00), interval adapts on HIGH/clean |
+| CrewAI 3-agent pipeline | Analyst → Report Writer → QA Reviewer (sequential, Google Gemini) |
+| Gemini model auto-discovery | Dynamic API query + fallback ranked list |
+| Weather context | Open-Meteo API, WMO code lookup, injected into CrewAI context |
+| DHT22 sensor | `adafruit_dht` + stub; temperature/humidity injected into CrewAI context |
+| Email notifications | HTML report + image attachment via SMTP/aiosmtplib |
+| Telegram notifications | Markdown report + photo via `python-telegram-bot` |
+| FastAPI REST API | All routes: health, camera, detections, reports, images, sensor, settings |
+| MJPEG live stream | `/camera/feed` — optional YOLO bounding box overlay |
+| Web dashboard UI | 5 pages: Dashboard, Detections, Reports, Live Feed, Settings |
+| Demo mode | Separate DB (`solar_sentinel_demo.db`), seeded with fake detections + reports |
+| Runtime settings | Persisted to SQLite, applied live to notification service |
+| 3D-printed enclosure | KCL parametric model + STEP export |
+
+### 🔲 Not Yet Implemented
+
+| Feature | Thesis Reference | Notes |
+|:--------|:----------------|:------|
+| MCP server + 4 tools | §2.2, §3.3 | Agents have no tool access beyond context strings; web search, time, and weather tools unbuilt |
+| Maintenance Planner agent | §1.4.3, §3.3 | 4th agent described in thesis; code has 3 agents (Analyst → Writer → QA) |
+| VLM image input to agents | §1.4.3, §3.6 | Thesis describes Defect Analyst using VLM on the image; code passes only text (class name, confidence, bbox) |
+| Sensor-triggered capture | §3.3 | DHT22 thresholds (>35°C, <0°C, >85% RH) not wired to scheduler; sensor reads context only |
+| ROI privacy masking | §4.3 | User-defined panel boundary mask to black out non-panel pixels before inference; not implemented |
+| MEDIUM detection digest | §3.11 | UI shows "daily digest" slider; backend logs MEDIUM detections only, no batch delivery |
+| Real daylight calculation | §3.3 | Sunrise/sunset hardcoded 06:00–20:00; no location-based solar calculation |
+| Binary detection model | §2.2 | Thesis describes final model as binary (defect/healthy); code still trains 3-class |
+| Token counting | — | `tokens_used` logged as `0` — CrewAI does not expose token counts |
+
+---
+
+## 💰 Economics (from Thesis)
+
+| Metric | Value |
+|:-------|:------|
+| **Bill of Materials** | €216 |
+| **Total manufacturing cost / unit** | €301 (BOM + 3D printing + assembly labour) |
+| **Suggested retail price** | €450 |
+| **Commercial break-even** | ~41 units/year |
+| **Annual OPEX** | €19.53 (fan/SD card amortisation + one service visit every 3 years) |
+| **Annual energy savings** (5 kWp system) | ~€110 (500 kWh recovered at €0.22/kWh) |
+| **ROI** | 19.05% |
+| **Payback period** | 5.25 years |
 
 ---
 
