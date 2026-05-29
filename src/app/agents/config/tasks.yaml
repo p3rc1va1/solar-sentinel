@@ -1,52 +1,109 @@
 analyze_defect_task:
   description: >
-    Analyze the following solar panel defect detection.
+    Examine the attached panel image and classify the defect.
 
-    ## Current Detection
-    - Defect class: {defect_class}
-    - Confidence score: {confidence}
-    - Bounding box: {bbox}
+    ## YOLO Trigger
+    - Detected class (hint, may be wrong): {defect_class}
+    - Confidence: {confidence}
+    - Bounding box (x1,y1,x2,y2 in pixels): {bbox}
     - Panel ID: {panel_id}
     - Timestamp: {timestamp}
 
-    ## Environmental Context
-    - Weather: {weather_summary}
-    - Temperature: {temperature}
+    ## Site Context
+    - Weather (current): {weather_summary}
+    - Local temperature: {temperature}
 
     ## Historical Context (Last 7 Days)
     {historical_context}
 
+    ## Image
+    Use the Add image to content tool to attach the image at this path,
+    then describe what you see in the bounded region:
+    {image_path}
+
     ## Instructions
-    1. Assess severity: CRITICAL, WARNING, or INFO
-    2. Identify the most likely root cause
-    3. Determine urgency: IMMEDIATE, WITHIN_1_WEEK, or ROUTINE
-    4. Check for trends compared to historical data
-    5. Provide a preliminary recommendation
+    1. Look at the image. Confirm the YOLO trigger is a real defect, or
+       reject it as a benign artefact (shadow, bird, reflection).
+    2. If real, identify the defect sub-type — pick the single best label
+       from: physical_damage, soiling, snow_or_ice, debris, hot_spot,
+       discoloration, other. The thesis YOLO trigger is binary
+       (defect/healthy); sub-typing happens here.
+    3. Assess severity: CRITICAL, WARNING, or INFO.
+    4. Determine urgency: IMMEDIATE, WITHIN_1_WEEK, or ROUTINE.
+    5. Compare with the last 7 days. Note trends (worsening, stable, new).
+    6. Do NOT recommend maintenance actions — leave that to the planner.
 
   expected_output: >
     Respond with a JSON object containing these exact keys:
-    severity (CRITICAL/WARNING/INFO), root_cause (string),
-    urgency (IMMEDIATE/WITHIN_1_WEEK/ROUTINE), trend_analysis (string),
-    preliminary_recommendation (string), confidence_assessment (string).
+    is_real_defect (boolean), defect_subtype (string), severity
+    (CRITICAL/WARNING/INFO), urgency (IMMEDIATE/WITHIN_1_WEEK/ROUTINE),
+    root_cause (string, evidence-based), trend_analysis (string),
+    visual_evidence (string — what specifically in the image supports
+    this classification).
   agent: analyzer_agent
+
+maintenance_planning_task:
+  description: >
+    Build a concrete maintenance plan based on the Defect Analyst's
+    findings (provided via task context).
+
+    ## Site
+    - Latitude: {latitude}
+    - Longitude: {longitude}
+    - Timezone: {tz_name}
+    - Panel ID: {panel_id}
+
+    ## Available Tools (call these as needed)
+    - current_time(latitude, longitude, tz_name): use to confirm daylight
+      hours and seconds until sunset.
+    - weather_forecast(latitude, longitude, hours): get hourly forecast;
+      use to find a dry, mild window for field work.
+    - web_search(query, max_results): search for known issues or
+      maintenance procedures when the defect_subtype is unusual or you
+      need an external reference.
+
+    ## Instructions
+    1. Read the analyst's JSON output from context. If is_real_defect is
+       false, return a minimal plan that says "no action required" and
+       skip the rest.
+    2. Otherwise, call current_time and weather_forecast for the site.
+    3. If the defect_subtype is unusual, call web_search once to ground
+       your recommendations (e.g., "PV panel hot spot mitigation").
+    4. Produce 2-5 specific, ordered actions. Each action must be
+       physically possible during the recommended window.
+    5. State the recommended window explicitly (e.g., "Tomorrow 10:00 to
+       14:00 local — dry and 18 °C").
+    6. Flag environmental constraints (wet, windy, frozen, after dark).
+
+  expected_output: >
+    Respond with a JSON object containing exact keys:
+    recommended_actions (list of strings, ordered),
+    timing_window (string — when to perform the work),
+    weather_constraints (string — what to avoid),
+    references (list of {{"title": str, "url": str}} from web_search,
+    may be empty).
+  agent: maintenance_planner_agent
 
 write_report_task:
   description: >
-    Using the defect analysis below, create a maintenance action report.
+    Combine the analyst's findings and the planner's action plan into a
+    single field-ready maintenance report.
+
+    The analyst's JSON and the planner's JSON are available via task
+    context. Do not invent any fact that is not in either.
 
     ## Required Sections
     1. EXECUTIVE SUMMARY (2-3 sentences)
-    2. DEFECT DETAILS (class, location, severity, confidence)
-    3. ROOT CAUSE ANALYSIS
-    4. TREND ANALYSIS (comparison with last 7 days)
-    5. RECOMMENDED ACTIONS (numbered, specific, actionable steps)
-    6. PRIORITY AND TIMELINE
-    7. SAFETY CONSIDERATIONS (if applicable)
+    2. DEFECT DETAILS (sub-type from analyst, location, severity, what
+       was visible in the image)
+    3. ROOT CAUSE
+    4. TREND ANALYSIS (from analyst)
+    5. RECOMMENDED ACTIONS (numbered, from planner verbatim or condensed)
+    6. TIMING & WEATHER WINDOW (from planner)
+    7. SAFETY CONSIDERATIONS (only if planner flagged constraints)
+    8. REFERENCES (only if planner provided any)
 
-    ## Analysis Input
-    {analyzer_output}
-
-    Format the report in Markdown. Keep it concise — maximum 400 words.
+    Format the report in Markdown. Maximum 400 words.
 
   expected_output: >
     A complete Markdown-formatted maintenance report ready for
@@ -55,30 +112,29 @@ write_report_task:
 
 qa_review_task:
   description: >
-    Review the following maintenance report for quality and accuracy.
+    Review the maintenance report for accuracy, grounding, and
+    consistency with both the analyst's image-grounded findings and the
+    planner's tool-grounded action plan (both available via context).
 
-    ## Original Detection Data
-    - Defect class: {defect_class}
-    - Confidence: {confidence}
+    ## Original Detection
+    - YOLO class: {defect_class}
+    - YOLO confidence: {confidence}
     - Timestamp: {timestamp}
 
-    ## Analyzer Output
-    {analyzer_output}
-
-    ## Report to Review
-    {report_content}
-
     ## Review Checklist
-    1. Does the severity match the detection confidence and defect class?
-    2. Are all recommended actions physically possible and safe?
-    3. Is the timeline realistic for the stated severity?
-    4. Are there any claims not supported by the detection data?
-    5. Is the language clear and free of technical jargon?
-    6. Is the report concise (under 400 words)?
+    1. Does the report's defect sub-type and severity match the analyst's JSON?
+    2. Are recommended actions exactly the planner's list (or a faithful
+       condensation)? No new actions invented.
+    3. Is the timing window consistent with the planner's weather and
+       daylight findings?
+    4. Are any safety constraints from the planner reflected?
+    5. Are all citations/URLs preserved (or omitted if planner had none)?
+    6. Is the language clear and free of jargon?
+    7. Is the report under 400 words?
 
-    Score the report 1-10 and provide specific feedback.
-    If score >= 7, approve for delivery.
-    If < 7, rewrite the report incorporating your feedback.
+    Score the report 1-10. If score >= 7, approve. If < 7, rewrite the
+    report to fix the issues, preserving the planner's actions and the
+    analyst's classifications.
 
   expected_output: >
     Respond with a JSON object containing: score (integer 1-10),

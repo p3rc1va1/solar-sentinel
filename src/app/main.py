@@ -38,6 +38,7 @@ def _build_high_detection_callback(
     weather: WeatherService,
     notif: NotificationService,
     sensor: DHTSensor,
+    settings: Settings,
 ):
     """Build the async callback for HIGH confidence detections.
 
@@ -85,6 +86,9 @@ def _build_high_detection_callback(
                 weather_summary=weather_summary,
                 temperature=temperature,
                 historical_context=historical_context,
+                latitude=settings.weather_latitude,
+                longitude=settings.weather_longitude,
+                tz_name=settings.weather_timezone,
             )
 
             # 4. Save report to DB
@@ -106,6 +110,9 @@ def _build_high_detection_callback(
                     report_markdown=result["report_markdown"],
                     qa_score=result["qa_score"],
                     qa_approved=result["qa_approved"],
+                    defect_subtype=result.get("defect_subtype"),
+                    analyzer_output_json=result.get("analyzer_output_json"),
+                    planner_output_json=result.get("planner_output_json"),
                 )
 
                 # Track Gemini usage
@@ -200,7 +207,7 @@ async def lifespan(app: FastAPI):
     from app.agents import crew as crew_module
 
     # Build pipeline callbacks
-    on_high = _build_high_detection_callback(db, crew_module, gemini, weather, notif, sensor)
+    on_high = _build_high_detection_callback(db, crew_module, gemini, weather, notif, sensor, s)
     on_medium = _build_medium_detection_callback(db)
 
     # Scheduler

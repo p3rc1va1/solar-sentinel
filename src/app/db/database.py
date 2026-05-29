@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS reports (
     report_markdown TEXT NOT NULL,
     qa_score INTEGER NOT NULL,
     qa_approved INTEGER NOT NULL DEFAULT 0,
+    defect_subtype TEXT,
+    analyzer_output_json TEXT,
+    planner_output_json TEXT,
     FOREIGN KEY (detection_id) REFERENCES detections(id)
 );
 
@@ -73,8 +76,21 @@ class Database:
         self._db = await aiosqlite.connect(self.db_path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA)
+        await self._migrate()
         await self._db.commit()
         logger.info("Database connected: %s", self.db_path)
+
+    async def _migrate(self) -> None:
+        """Idempotent additive migrations for installs predating the current schema."""
+        cursor = await self.db.execute("PRAGMA table_info(reports)")
+        existing = {row["name"] for row in await cursor.fetchall()}
+        for col, ddl in (
+            ("defect_subtype", "ALTER TABLE reports ADD COLUMN defect_subtype TEXT"),
+            ("analyzer_output_json", "ALTER TABLE reports ADD COLUMN analyzer_output_json TEXT"),
+            ("planner_output_json", "ALTER TABLE reports ADD COLUMN planner_output_json TEXT"),
+        ):
+            if col not in existing:
+                await self._db.execute(ddl)
 
     async def disconnect(self) -> None:
         if self._db:
@@ -149,16 +165,21 @@ class Database:
         report_markdown: str,
         qa_score: int,
         qa_approved: bool,
+        defect_subtype: str | None = None,
+        analyzer_output_json: str | None = None,
+        planner_output_json: str | None = None,
     ) -> int:
         cursor = await self.db.execute(
             """INSERT INTO reports
                (detection_id, severity, urgency, root_cause, trend_analysis,
-                report_markdown, qa_score, qa_approved)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                report_markdown, qa_score, qa_approved,
+                defect_subtype, analyzer_output_json, planner_output_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 detection_id, severity, urgency, root_cause,
                 trend_analysis, report_markdown, qa_score,
                 1 if qa_approved else 0,
+                defect_subtype, analyzer_output_json, planner_output_json,
             ),
         )
         await self.db.execute(

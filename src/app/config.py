@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     # --- Weather ---
     weather_latitude: str = ""
     weather_longitude: str = ""
+    weather_timezone: str = "UTC"
 
     # --- Derived paths ---
     @property

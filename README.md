@@ -20,7 +20,7 @@
 
 ---
 
-## 🔍 Overview
+## Overview
 
 Solar Sentinel is an end-to-end autonomous maintenance system for solar panels. It captures images using a camera mounted on a Raspberry Pi 5, runs real-time defect detection using a custom-trained YOLO26 Nano model, and — when a defect is found — triggers a multi-agent CrewAI pipeline powered by Google Gemini to analyze the defect, write a professional maintenance report, and send notifications via email or Telegram.
 
@@ -28,19 +28,19 @@ Solar Sentinel is an end-to-end autonomous maintenance system for solar panels. 
 
 ### Key Features
 
-- 🎯 **Binary Detection** — `defect` (damage or blockage) · `healthy` — class granularity resolved by the agentic layer
-- 🤖 **Agentic Analysis** — Multi-agent pipeline (Analyst → Report Writer → QA Reviewer)
-- 🔧 **MCP Tool Integration** — Agents access weather, time, and web search tools *(not yet implemented)*
-- 🌡️ **Environmental Context** — Temperature/humidity sensor (DHT22) + Open-Meteo weather API enrich reports
-- 📱 **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached images
-- 🔄 **Adaptive Scheduling** — Capture frequency adapts to detection results
-- 🌙 **Daylight-Aware** — Only captures during daylight hours (06:00–20:00, hardcoded)
-- 🛡️ **Smart Triage** — Rule-based filtering (deduplication, transient rejection, exposure check) before any LLM call
-- 🌐 **Web Dashboard** — FastAPI backend with REST API and static UI
+- **Binary Detection** — `defect` (damage or blockage) · `healthy` — class granularity resolved by the agentic layer
+- **Agentic Analysis** — Multi-agent pipeline (Analyst → Report Writer → QA Reviewer)
+- **MCP Tool Integration** — Agents access weather, time, and web search tools *(not yet implemented)*
+- **Environmental Context** — Temperature/humidity sensor (DHT22) + Open-Meteo weather API enrich reports
+- **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached images
+- **Adaptive Scheduling** — Capture frequency adapts to detection results
+- **Daylight-Aware** — Only captures during daylight hours (06:00–20:00, hardcoded)
+- **Smart Triage** — Rule-based filtering (deduplication, transient rejection, exposure check) before any LLM call
+- **Web Dashboard** — FastAPI backend with REST API and static UI
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 The system follows a multi-stage pipeline architecture. The diagram below shows the complete algorithmic flow from image capture to notification delivery:
 
@@ -52,11 +52,11 @@ The system follows a multi-stage pipeline architecture. The diagram below shows 
 
 ---
 
-## ⚙️ How It Works
+## How It Works
 
 A step-by-step walkthrough of the algorithmic flow:
 
-### Step 1 · Trigger
+### Step 1 - Trigger
 
 The system can be triggered in three ways:
 
@@ -66,11 +66,11 @@ The system can be triggered in three ways:
 | **Manual** | User triggers a capture via the web UI or REST API |
 | **Sensor** | DHT22 thresholds: temp >35°C (PV efficiency drop), temp <0°C (icing risk), humidity >85% (particulate cementation) *(not yet implemented — sensor is read for context only)* |
 
-### Step 2 · Image Capture
+### Step 2 - Image Capture
 
 The **Camera Module 3 Wide** captures a still frame at 640×640 resolution. Before processing, a **frame quality check** runs — frames that are >30% overexposed or underexposed are rejected immediately to avoid false positives from glare or darkness.
 
-### Step 3 · YOLO26 Nano Inference
+### Step 3 - YOLO26 Nano Inference
 
 The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN format for ARM optimization). Per the thesis design, the model acts as a **binary smart trigger** — classifying frames as `defect` or `healthy` — because defect sub-type analysis (damage vs. blockage) is delegated to the agentic pipeline's VLM capabilities, which provides better semantic understanding. The model outputs bounding boxes with confidence scores:
 
@@ -81,7 +81,7 @@ The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN form
 
 > **Note:** The current code still trains with `damage` / `blockage` / `healthy` classes. The thesis describes the intended final design as binary (`defect` / `healthy`). Recent commits reflect this migration in progress.
 
-### Step 4 · Confidence-Based Routing
+### Step 4 - Confidence-Based Routing
 
 The detection confidence score determines what happens next:
 
@@ -98,7 +98,7 @@ Detection Confidence
                            capture frequency to every 30 min
 ```
 
-### Step 5 · Triage Agent (Rule-Based)
+### Step 5 - Triage Agent (Rule-Based)
 
 Before any LLM call, a **rule-based triage agent** filters detections:
 
@@ -106,7 +106,7 @@ Before any LLM call, a **rule-based triage agent** filters detections:
 2. **Transient Filter** — Requires 2 consecutive detections at the same location to confirm (prevents one-off false positives)
 3. **`healthy` Rejection** — Clean panels never trigger the LLM pipeline
 
-### Step 6 · Environmental Context
+### Step 6 - Environmental Context
 
 When a detection passes triage, the system enriches it with context:
 
@@ -114,7 +114,7 @@ When a detection passes triage, the system enriches it with context:
 - **Temperature & Humidity** — Local sensor data from the Adafruit AM2302/DHT22 (reads in background; included in report context)
 - **Historical** — Previous detections from the SQLite database for trend analysis
 
-### Step 7 · CrewAI Agentic Pipeline
+### Step 7 - CrewAI Agentic Pipeline
 
 The enriched detection triggers a **sequential multi-agent pipeline** powered by Google Gemini:
 
@@ -132,9 +132,9 @@ The enriched detection triggers a **sequential multi-agent pipeline** powered by
 │  Current code: Analyst → Report Writer → QA Reviewer (3 agents) │
 │                                                                  │
 │  MCP Server (not yet implemented)                                │
-│  ├── 🌐 Web Search / Fetch Tool                                 │
-│  ├── 🕐 Time Tool                                               │
-│  └── ⛅ Weather Forecast Tool                                   │
+│  ├── Web Search / Fetch Tool                                    │
+│  ├── Time Tool                                                  │
+│  └── Weather Forecast Tool                                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -149,7 +149,7 @@ The enriched detection triggers a **sequential multi-agent pipeline** powered by
 
 **Current code (3 agents — `agents/crew.py`):** Analyst → Report Writer → QA Reviewer. The Maintenance Planner is not yet implemented; MCP tools are not wired.
 
-### Step 8 · Notification Delivery
+### Step 8 - Notification Delivery
 
 The approved report is delivered through all enabled channels:
 
@@ -158,7 +158,7 @@ The approved report is delivered through all enabled channels:
 | **Email** | SMTP | HTML-formatted report with attached detection image |
 | **Telegram** | Bot API | Markdown report + photo sent to configured chat |
 
-### Step 9 · Logging & Adaptive Sleep
+### Step 9 - Logging & Adaptive Sleep
 
 Every detection (whether it triggers the pipeline or not) is logged to an **SQLite database** with:
 - Image path, defect class, confidence, bounding box coordinates
@@ -168,7 +168,7 @@ The scheduler then adapts its capture interval based on recent history and enter
 
 ---
 
-## 🔩 Hardware
+## Hardware
 
 <div align="center">
 
@@ -193,14 +193,14 @@ The scheduler then adapts its capture interval based on recent history and enter
 - **Material:** ASA (Acrylonitrile Styrene Acrylate) — UV-resistant, 105°C glass transition temperature
 - **Dimensions:** 179 mm × 56 mm × 133 mm · **Weight:** ~290 g total assembly
 - **Wall thickness:** 3.2 mm · **Lid overhang:** 8 mm rain guard
-- 🔲 Tightly fitted camera lens port and DHT22 sensor mount
-- 🌬️ Ventilation slots: 30×4 mm rear panel + 80×4 mm bottom panel (natural convection)
-- 🔒 Gasket groove with snapping-arm lid seal; 15.5 mm cable gland for power
-- 🔩 M2.5 Pan Head (ISO 7045) standoffs for Pi 5 mounting
+- Tightly fitted camera lens port and DHT22 sensor mount
+- Ventilation slots: 30×4 mm rear panel + 80×4 mm bottom panel (natural convection)
+- Gasket groove with snapping-arm lid seal; 15.5 mm cable gland for power
+- M2.5 Pan Head (ISO 7045) standoffs for Pi 5 mounting
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology | Role |
 |:------|:-----------|:-----|
@@ -216,7 +216,7 @@ The scheduler then adapts its capture interval based on recent history and enter
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 solar-sentinel/
@@ -278,7 +278,7 @@ solar-sentinel/
 │   │   └── style.css                # Styles
 │   │
 │   ├── notebooks/
-│   │   └── train_yolo26n.ipynb      # 📓 Colab training notebook
+│   │   └── train_yolo26n.ipynb      # Colab training notebook
 │   │
 │   ├── tests/                       # Test suite
 │   ├── pyproject.toml               # Dependencies & tool config
@@ -290,7 +290,7 @@ solar-sentinel/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -383,22 +383,22 @@ The web dashboard is available at `http://<pi-ip>:8000` on the local network. Fo
 
 ---
 
-## 📊 Detection Classes
+## Detection Classes
 
 The thesis design uses **binary detection** — YOLO acts only as a trigger, not a classifier. The agentic pipeline (VLM) determines the defect type. The current code still uses 3 classes (migration in progress per recent commits).
 
 | Class | Thesis Design | Current Code | Triggers Pipeline |
 |:------|:-------------|:-------------|:------------------|
-| **defect** | ✅ Intended final | migration in progress | ✅ → CrewAI |
-| **damage** | ❌ delegated to agents | ✅ active in code | ✅ → CrewAI |
-| **blockage** | ❌ delegated to agents | ✅ active in code | ✅ → CrewAI |
-| **healthy** | ✅ keep | ✅ active in code | ❌ no action |
+| **defect** | Intended final | migration in progress | Yes - CrewAI |
+| **damage** | delegated to agents | active in code | Yes - CrewAI |
+| **blockage** | delegated to agents | active in code | Yes - CrewAI |
+| **healthy** | keep | active in code | No |
 
 ---
 
-## 🗺️ Status
+## Status
 
-### ✅ Implemented
+### Implemented
 
 | Component | Notes |
 |:----------|:------|
@@ -419,7 +419,7 @@ The thesis design uses **binary detection** — YOLO acts only as a trigger, not
 | Runtime settings | Persisted to SQLite, applied live to notification service |
 | 3D-printed enclosure | KCL parametric model + STEP export |
 
-### 🔲 Not Yet Implemented
+### Not Yet Implemented
 
 | Feature | Thesis Reference | Notes |
 |:--------|:----------------|:------|
@@ -435,7 +435,7 @@ The thesis design uses **binary detection** — YOLO acts only as a trigger, not
 
 ---
 
-## 💰 Economics (from Thesis)
+## Economics (from Thesis)
 
 | Metric | Value |
 |:-------|:------|
@@ -450,7 +450,7 @@ The thesis design uses **binary detection** — YOLO acts only as a trigger, not
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
