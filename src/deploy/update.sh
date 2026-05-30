@@ -48,11 +48,35 @@ fi
 
 SERVICE="solar-sentinel"
 
+# Resolve uv binary. sudo strips PATH down to /etc/sudoers' secure_path, so
+# uv installed at $HOME/.local/bin/uv is invisible. Try common locations.
+UV_BIN=""
+for candidate in \
+    "$(command -v uv 2>/dev/null || true)" \
+    "/home/$(logname 2>/dev/null || echo "$SUDO_USER")/.local/bin/uv" \
+    "$HOME/.local/bin/uv" \
+    "/usr/local/bin/uv" \
+    "/usr/bin/uv"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        UV_BIN="$candidate"
+        break
+    fi
+done
+if [[ -z "$UV_BIN" ]]; then
+    echo "ERROR: could not locate the 'uv' binary." >&2
+    echo "       Install with:  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    echo "       Or set UV_BIN explicitly:  UV_BIN=/path/to/uv solar-sentinel-update" >&2
+    exit 1
+fi
+# Allow caller to override
+UV_BIN="${UV_BIN_OVERRIDE:-$UV_BIN}"
+
 cd "$REPO_DIR"
 
 echo "── solar-sentinel update ──"
 echo "Repo:    $REPO_DIR"
 echo "App:     $APP_DIR"
+echo "uv:      $UV_BIN"
 echo "Branch:  $(git rev-parse --abbrev-ref HEAD)"
 echo "Before:  $(git rev-parse --short HEAD)"
 
@@ -74,7 +98,7 @@ echo "After:   $(git rev-parse --short HEAD)"
 echo
 echo "── uv sync ──"
 cd "$APP_DIR"
-uv sync
+"$UV_BIN" sync
 
 # 3. Re-install picamera2. uv sync strips it because it's not in pyproject.toml
 #    (Linux-only build dep python-prctl breaks cross-platform lockfile resolution).
@@ -83,7 +107,7 @@ if [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "aarch64" ]]; then
     echo
     echo "── pi-only: picamera2 ──"
     if ! .venv/bin/python -c "import picamera2" 2>/dev/null; then
-        uv pip install picamera2
+        "$UV_BIN" pip install picamera2
     else
         echo "picamera2 already importable — skipping."
     fi
