@@ -32,9 +32,16 @@ dependencies = [
 
 [project.optional-dependencies]
 # NOTE: picamera2 is NOT listed here because its transitive dep (python-prctl)
-# is Linux-only and breaks cross-platform lockfile resolution.
-# On the Pi, install it separately: uv pip install picamera2
-# The app handles its absence gracefully (camera.py uses a stub on non-Pi).
+# is Linux-only and breaks cross-platform lockfile resolution. We tried
+# putting it in a [dependency-groups] table with a platform marker; uv still
+# resolves the group at lockfile time on macOS and python-prctl fails to
+# build there. So the canonical workflow is:
+#
+#   uv sync                          # cross-platform safe, picamera2 not installed
+#   uv pip install picamera2         # Pi only, after a successful uv sync
+#
+# `src/deploy/update.sh` automates this. The app handles picamera2's absence
+# gracefully (camera.py uses a stub on non-Pi).
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

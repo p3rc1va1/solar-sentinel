@@ -5,9 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=exec
+# Replace `pi` with whichever user owns /opt/solar-sentinel on your Pi.
+# On the Pi 5 imager-default install, the user is whatever you set during
+# imaging — NOT necessarily `pi`.
 User=pi
 WorkingDirectory=/opt/solar-sentinel
-ExecStart=/usr/local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+# uv is installed at $HOME/.local/bin/uv by the official installer. systemd
+# does NOT inherit your shell PATH, so the absolute path is required. If
+# yours differs, run `which uv` and substitute.
+ExecStart=/home/pi/.local/bin/uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
@@ -17,7 +23,16 @@ StandardError=journal
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/solar-sentinel/data
+# PrivateTmp gives the service its own /tmp + /var/tmp namespace.
+# Required because ProtectSystem=strict makes the host /tmp invisible, and
+# Python's tempfile module fails to start without a usable temp dir.
+PrivateTmp=true
+# Every path here MUST exist when systemd starts the unit, otherwise
+# the namespace setup fails with status=226/NAMESPACE.
+#   - data/      app writes (DB, captures, model)
+#   - .venv/     uv may rewrite venv state on first run
+#   - ~/.cache/  uv + Ultralytics + various libraries cache here
+ReadWritePaths=/opt/solar-sentinel/data /opt/solar-sentinel/.venv /home/pi/.cache
 
 [Install]
 WantedBy=multi-user.target

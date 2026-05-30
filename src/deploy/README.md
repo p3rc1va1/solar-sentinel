@@ -12,10 +12,83 @@ deps, restarts the service, and health-checks itself.
 | `solar-sentinel.service` | Systemd unit running the FastAPI app on boot. |
 | `first-boot.sh` | One-time provisioning for a freshly flashed SD card (Tailscale, uv, service install). |
 | `deploy.sh` | Called by the GitHub Actions deploy job. Rsyncs code, runs `uv sync`, restarts service, health-checks. |
+| `update.sh` | One-shot manual update: `git pull` + `uv sync` + reinstall `picamera2` + restart service. Use when not running the GitHub Actions runner. |
 | `sudoers-solar-sentinel` | Sudoers fragment letting the runner restart the service without a password. |
 | `README.md` | This file. |
 
 The CI/CD entry point is `.github/workflows/deploy.yml` at the repo root.
+
+---
+
+# Pi system prerequisites (do these once)
+
+Before any deploy method works, the Pi needs a few system packages and a
+correctly-shaped venv. Skipping any of these will produce confusing errors
+that surface later (most often "Camera running in stub mode" even with the
+camera plugged in, or a `226/NAMESPACE` failure from systemd).
+
+```bash
+# Camera tooling + system Python bindings for libcamera
+sudo apt update
+sudo apt install -y rpicam-apps python3-picamera2 python3-libcamera libcap-dev
+
+# Verify libcamera sees the camera before going further
+rpicam-hello --list-cameras       # must list imx708_wide or similar
+
+# Recreate the venv with --system-site-packages so picamera2 can import
+# libcamera (which is a system C++ library, not a pip package)
+cd /opt/solar-sentinel
+rm -rf .venv
+uv venv --system-site-packages
+uv sync
+uv pip install picamera2          # not in pyproject.toml on purpose; see note below
+
+# Confirm the camera stack is reachable from inside the venv
+.venv/bin/python -c "from picamera2 import Picamera2; Picamera2().close(); print('OK')"
+```
+
+If `rpicam-hello --list-cameras` shows no cameras, the issue is upstream of
+deployment — check the ribbon cable orientation and `/boot/firmware/config.txt`
+contains `camera_auto_detect=1`.
+
+**Why `picamera2` isn't in `pyproject.toml`.** Its transitive dep
+`python-prctl` is Linux-only and breaks lockfile resolution on macOS dev
+machines. Both `update.sh` and `deploy.sh` reinstall it after every `uv sync`.
+
+---
+
+# Day-to-day updates without GitHub Actions
+
+If you don't want to set up a self-hosted runner (the steps below), you have
+two simpler options:
+
+**Option A — One command from the Pi:**
+
+```bash
+ssh <user>@<pi-host>
+sudo /opt/solar-sentinel/deploy/update.sh
+```
+
+`update.sh` does: `git pull` (fast-forward only), `uv sync`, reinstall
+`picamera2` if missing, `sudo systemctl restart solar-sentinel`, print status.
+
+**Option B — One command from your laptop (after pushing to `main`):**
+
+```bash
+ssh <user>@<pi-host> 'sudo /opt/solar-sentinel/deploy/update.sh'
+```
+
+Mark the script executable on the Pi the first time:
+
+```bash
+ssh <user>@<pi-host> 'chmod +x /opt/solar-sentinel/deploy/update.sh'
+```
+
+`update.sh` is idempotent — running it with no new commits just re-syncs deps
+and restarts the service.
+
+If you want CI/CD-style deploys triggered automatically on every `main` push,
+keep reading the GitHub Actions setup below.
 
 ---
 
