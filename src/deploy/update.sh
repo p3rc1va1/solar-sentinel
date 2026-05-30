@@ -6,24 +6,53 @@
 # not in the lockfile), and restarts the systemd service.
 #
 # Usage on the Pi:
-#     /opt/solar-sentinel/deploy/update.sh
+#     /opt/solar-sentinel/src/deploy/update.sh
+# Or via the convenience symlink (created in deploy/README.md):
+#     sudo solar-sentinel-update
 # Or remotely from your laptop:
-#     ssh bahapie@<pi> 'sudo /opt/solar-sentinel/deploy/update.sh'
+#     ssh bahapie@<pi> 'sudo solar-sentinel-update'
 #
 # Idempotent: safe to run repeatedly even if there are no new commits.
 # Exits non-zero on any step failure.
 
 set -euo pipefail
 
-# Resolve repo root from script location (deploy/ lives at the repo root on the Pi)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# Resolve script location, dereferencing symlinks (e.g. /usr/local/bin/solar-sentinel-update).
+# `readlink -f` walks every symlink and returns the canonical path of the script itself.
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+
+# The git working tree may live anywhere up the directory tree from the script.
+# In the canonical Solar Sentinel layout, .git is at /opt/solar-sentinel/ but
+# this script lives at /opt/solar-sentinel/src/deploy/update.sh. Walk up until
+# we find the .git dir.
+REPO_DIR="$SCRIPT_DIR"
+while [[ "$REPO_DIR" != "/" && ! -d "$REPO_DIR/.git" ]]; do
+    REPO_DIR="$(dirname "$REPO_DIR")"
+done
+if [[ ! -d "$REPO_DIR/.git" ]]; then
+    echo "ERROR: could not find .git/ above $SCRIPT_DIR" >&2
+    exit 1
+fi
+
+# The Python project (pyproject.toml + venv) lives at <repo>/src on this layout.
+# If pyproject.toml is at the repo root instead (flat layout), use the repo root.
+if [[ -f "$REPO_DIR/src/pyproject.toml" ]]; then
+    APP_DIR="$REPO_DIR/src"
+elif [[ -f "$REPO_DIR/pyproject.toml" ]]; then
+    APP_DIR="$REPO_DIR"
+else
+    echo "ERROR: no pyproject.toml found at $REPO_DIR or $REPO_DIR/src" >&2
+    exit 1
+fi
+
 SERVICE="solar-sentinel"
 
 cd "$REPO_DIR"
 
 echo "── solar-sentinel update ──"
 echo "Repo:    $REPO_DIR"
+echo "App:     $APP_DIR"
 echo "Branch:  $(git rev-parse --abbrev-ref HEAD)"
 echo "Before:  $(git rev-parse --short HEAD)"
 
@@ -44,6 +73,7 @@ echo "After:   $(git rev-parse --short HEAD)"
 #    change but lockfile resolution was incomplete on a previous run).
 echo
 echo "── uv sync ──"
+cd "$APP_DIR"
 uv sync
 
 # 3. Re-install picamera2. uv sync strips it because it's not in pyproject.toml
@@ -79,3 +109,4 @@ if [[ "$NEW_COMMITS" == 1 ]]; then
 else
     echo "No new commits. Deps re-synced and service restarted."
 fi
+
