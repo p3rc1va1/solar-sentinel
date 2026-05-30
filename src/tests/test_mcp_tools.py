@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.agents.mcp.tools import forecast as forecast_mod
 from app.agents.mcp.tools import time_tool as time_mod
 from app.agents.mcp.tools import web_search as web_mod
