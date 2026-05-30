@@ -1,0 +1,55 @@
+name: Deploy to Raspberry Pi
+
+# Test on every push and PR. Deploy only on push to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Queue concurrent deploys to the Pi instead of cancelling — we don't want
+# a half-finished rsync interrupted by the next push.
+concurrency:
+  group: deploy-pi
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test (GitHub-hosted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        working-directory: src
+        run: uv sync --extra dev
+
+      - name: Run pytest
+        working-directory: src
+        run: uv run pytest
+
+      - name: Lint
+        working-directory: src
+        run: uv run ruff check .
+
+  deploy:
+    name: Deploy (self-hosted Pi)
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run deploy script
+        run: bash src/deploy/deploy.sh
+        env:
+          DEPLOY_TARGET: /opt/solar-sentinel
+          HEALTH_URL: http://localhost:8000/health

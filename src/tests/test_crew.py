@@ -22,6 +22,26 @@ class TestCrewHelpers:
         assert "timing_window" in result
         assert "planner_output_json" in result
         assert "analyzer_output_json" in result
+        # Token-counting fields always present.
+        assert result["usage"] == {"total_tokens": 0, "model_name": "unknown"}
+
+    def test_extract_usage_from_crew(self):
+        client = GeminiClient(api_key="")
+        crew_obj = SolarSentinelCrew(client)
+        crew_obj._last_model_name = "gemini-2.5-flash"
+        fake_crew = MagicMock()
+        fake_crew.usage_metrics = MagicMock(total_tokens=4321)
+        usage = crew_obj._extract_usage(fake_crew)
+        assert usage == {"total_tokens": 4321, "model_name": "gemini-2.5-flash"}
+
+    def test_extract_usage_handles_missing_metrics(self):
+        client = GeminiClient(api_key="")
+        crew_obj = SolarSentinelCrew(client)
+        fake_crew = MagicMock()
+        fake_crew.usage_metrics = None
+        usage = crew_obj._extract_usage(fake_crew)
+        assert usage["total_tokens"] == 0
+        assert usage["model_name"] == "unknown"
 
     def test_parse_result_with_valid_json(self):
         analyze_task = MagicMock()

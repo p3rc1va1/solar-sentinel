@@ -1,0 +1,16 @@
+# =============================================================================
+# Solar Sentinel — sudoers fragment for the GitHub Actions runner.
+#
+# Install:
+#   sudo cp /opt/solar-sentinel/deploy/sudoers-solar-sentinel \
+#           /etc/sudoers.d/solar-sentinel-deploy
+#   sudo chmod 0440 /etc/sudoers.d/solar-sentinel-deploy
+#   sudo visudo -c           # MUST print "parsed OK"
+#
+# Replace `bahapie` below with the user the runner runs as if it differs.
+#
+# This grants ONLY two commands without a password — nothing else. The runner
+# cannot escalate further with this rule.
+# =============================================================================
+
+bahapie ALL=(ALL) NOPASSWD: /bin/systemctl restart solar-sentinel, /bin/systemctl status solar-sentinel

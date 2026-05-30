@@ -358,7 +358,7 @@ tr.clickable {
     letter-spacing: 0.04em;
 }
 
-.badge-critical, .badge-damage {
+.badge-critical, .badge-defect, .badge-damage {
     background: rgba(239, 68, 68, 0.15);
     color: var(--danger);
     border: 1px solid rgba(239, 68, 68, 0.3);
@@ -836,6 +836,26 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-muted);
     font-style: italic;
 }
+
+/* ── City search dropdown ────────────────────────────────── */
+
+.search-results {
+    margin-top: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    max-height: 200px;
+    overflow-y: auto;
+}
+.search-results:empty { display: none; }
+.search-result {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: var(--bg-hover, #2a2a2a); }
 
 /* ── Report Detail (Markdown) ─────────────────────────────── */
 

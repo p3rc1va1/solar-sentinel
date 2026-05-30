@@ -83,12 +83,24 @@ class NotificationService:
             msg = MIMEMultipart("mixed")
             msg["From"] = self.smtp_username
             msg["To"] = self.email_address
-            msg["Subject"] = f"[Solar Sentinel] {severity} — Panel Defect Report"
+            if severity == "DIGEST":
+                msg["Subject"] = "[Solar Sentinel] Daily MEDIUM-detection Digest"
+            else:
+                msg["Subject"] = f"[Solar Sentinel] {severity} — Panel Defect Report"
 
-            color = {"CRITICAL": "#dc3545", "WARNING": "#ffc107"}.get(severity, "#28a745")
+            color = {
+                "CRITICAL": "#dc3545",
+                "WARNING": "#ffc107",
+                "DIGEST": "#0d6efd",
+            }.get(severity, "#28a745")
+            heading = (
+                "Daily MEDIUM-detection Digest"
+                if severity == "DIGEST"
+                else f"Solar Panel {severity} Alert"
+            )
             html = (
                 f'<html><body style="font-family: Arial, sans-serif; padding: 20px;">'
-                f'<h2 style="color: {color};">Solar Panel {severity} Alert</h2>'
+                f'<h2 style="color: {color};">{heading}</h2>'
                 f'<pre style="white-space: pre-wrap; font-family: monospace; '
                 f'background: #f8f9fa; padding: 16px; border-radius: 8px;">'
                 f'{report_markdown}</pre><hr>'
@@ -124,8 +136,18 @@ class NotificationService:
         """Send report via Telegram bot."""
         try:
             bot = self._get_bot()
-            icon = {"CRITICAL": "🔴", "WARNING": "🟡", "INFO": "🟢"}.get(severity, "⚪")
-            text = f"{icon} *Solar Sentinel — {severity}*\n\n{report_markdown}"
+            icon = {
+                "CRITICAL": "🔴",
+                "WARNING": "🟡",
+                "INFO": "🟢",
+                "DIGEST": "🟦",
+            }.get(severity, "⚪")
+            heading = (
+                "Daily Digest"
+                if severity == "DIGEST"
+                else severity
+            )
+            text = f"{icon} *Solar Sentinel — {heading}*\n\n{report_markdown}"
             if len(text) > 4000:
                 text = text[:4000] + "\n\n_(truncated)_"
 

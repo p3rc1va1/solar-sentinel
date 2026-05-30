@@ -28,9 +28,11 @@ async def populate_demo_data(db: Database) -> None:
         await db.log_gemini_usage("gemini-2.5-flash", random.randint(800, 1500), True)
     
     # 2. Fake detections & reports
+    # Binary detector emits only 'defect' / 'healthy'; the agent layer
+    # later refines defects into sub-types (physical_damage, soiling, …).
     demos = [
         {
-            "class": "damage",
+            "class": "defect",
             "conf": 0.92,
             "bbox": {"x": 100, "y": 150, "w": 200, "h": 200},
             "panel": "demo-panel-4",
@@ -45,7 +47,7 @@ async def populate_demo_data(db: Database) -> None:
             }
         },
         {
-            "class": "blockage",
+            "class": "defect",
             "conf": 0.78,
             "bbox": {"x": 300, "y": 50, "w": 100, "h": 100},
             "panel": "demo-panel-2",
@@ -68,7 +70,7 @@ async def populate_demo_data(db: Database) -> None:
             "report": None
         },
         {
-            "class": "damage",
+            "class": "defect",
             "conf": 0.55,
             "bbox": {"x": 500, "y": 400, "w": 30, "h": 10},
             "panel": "demo-panel-3",

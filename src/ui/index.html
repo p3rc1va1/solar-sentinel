@@ -352,6 +352,66 @@
                             <span class="range-value" id="confMediumVal">0.45</span>
                         </div>
                     </div>
+
+                    <div class="card">
+                        <h2>Location</h2>
+                        <p class="guide-note">Used for sunrise/sunset and weather context. Pick the closest large city.</p>
+                        <div class="form-group">
+                            <label for="citySearch">City</label>
+                            <input type="text" id="citySearch" placeholder="Type a city name…" autocomplete="off">
+                            <div id="citySearchResults" class="search-results"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Selected location</label>
+                            <input type="text" id="locationLabel" readonly placeholder="(none)">
+                        </div>
+                        <div class="form-group" style="display:flex;gap:.5rem;">
+                            <input type="text" id="weatherLat" readonly placeholder="latitude" style="flex:1;">
+                            <input type="text" id="weatherLon" readonly placeholder="longitude" style="flex:1;">
+                            <input type="text" id="weatherTz" readonly placeholder="timezone" style="flex:1.5;">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Sensor Triggers</h2>
+                        <p class="guide-note">DHT22 thresholds that fire an out-of-band capture. Per-channel cooldown prevents spam.</p>
+                        <div class="form-group toggle-group">
+                            <input type="checkbox" id="sensorTriggerEnabled" class="toggle-input">
+                            <label for="sensorTriggerEnabled" class="toggle-switch"><span class="toggle-knob"></span></label>
+                            <label for="sensorTriggerEnabled" class="toggle-text">Enable sensor-triggered capture</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="sensorTempHigh">Temperature high threshold (°C)</label>
+                            <input type="number" id="sensorTempHigh" step="0.5" value="35.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="sensorTempLow">Temperature low threshold (°C)</label>
+                            <input type="number" id="sensorTempLow" step="0.5" value="0.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="sensorHumidityHigh">Humidity high threshold (%)</label>
+                            <input type="number" id="sensorHumidityHigh" step="1" min="0" max="100" value="85">
+                        </div>
+                        <div class="form-group">
+                            <label for="sensorCooldown">Cooldown between triggers (minutes)</label>
+                            <input type="range" id="sensorCooldown" min="5" max="60" step="5" value="15">
+                            <span class="range-value" id="sensorCooldownVal">15</span>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Daily Digest</h2>
+                        <p class="guide-note">Once a day, MEDIUM-confidence detections are summarised by Gemini and delivered through your enabled notification channels. Skipped silently when there's nothing to report.</p>
+                        <div class="form-group toggle-group">
+                            <input type="checkbox" id="digestEnabled" class="toggle-input">
+                            <label for="digestEnabled" class="toggle-switch"><span class="toggle-knob"></span></label>
+                            <label for="digestEnabled" class="toggle-text">Enable daily digest</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="digestTime">Send time (local)</label>
+                            <input type="time" id="digestTime" value="20:00">
+                        </div>
+                    </div>
                 </div>
                 <button class="btn btn-primary" id="btnSaveSettings" style="margin-top:1rem;">Save Settings</button>
                 <span class="save-status" id="saveStatus"></span>

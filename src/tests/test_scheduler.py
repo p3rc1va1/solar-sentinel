@@ -1,7 +1,6 @@
 """Tests for app.core.scheduler."""
 
 import asyncio
-from datetime import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,7 +10,7 @@ from PIL import Image
 from app.config import Settings
 from app.core.camera import Camera
 from app.core.detector import Detection, Detector
-from app.core.scheduler import CaptureScheduler, DEFAULT_SUNRISE, DEFAULT_SUNSET
+from app.core.scheduler import CaptureScheduler
 from app.core.triage import TriageAgent
 from app.db.database import Database
 
@@ -26,6 +25,9 @@ def mock_settings(tmp_path):
     s.confidence_medium = 0.45
     s.detections_dir = tmp_path / "detections"
     s.detections_dir.mkdir()
+    s.weather_latitude = ""
+    s.weather_longitude = ""
+    s.weather_timezone = "UTC"
     return s
 
 
@@ -138,7 +140,27 @@ class TestCaptureScheduler:
         assert result == []  # pending confirmation
 
 
-class TestDefaultTimes:
-    def test_sunrise_sunset(self):
-        assert DEFAULT_SUNRISE == time(6, 0)
-        assert DEFAULT_SUNSET == time(20, 0)
+class TestDaylightFallback:
+    def test_missing_coords_assumes_daylight(self, mock_camera, mock_detector, mock_triage, mock_db, mock_settings, caplog):
+        sched = CaptureScheduler(
+            mock_camera, mock_detector, mock_triage, mock_db, mock_settings
+        )
+        # Defaults: weather_latitude="" / longitude=""
+        with caplog.at_level("WARNING"):
+            assert sched._is_daylight() is True
+        assert "not configured" in caplog.text
+        # One-shot — second call doesn't re-warn
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            sched._is_daylight()
+        assert "not configured" not in caplog.text
+
+    def test_with_coords_uses_solar(self, mock_camera, mock_detector, mock_triage, mock_db, mock_settings):
+        mock_settings.weather_latitude = "54.6872"
+        mock_settings.weather_longitude = "25.2797"
+        mock_settings.weather_timezone = "Europe/Vilnius"
+        sched = CaptureScheduler(
+            mock_camera, mock_detector, mock_triage, mock_db, mock_settings
+        )
+        # Just check it returns a bool — concrete value depends on wall-clock.
+        assert isinstance(sched._is_daylight(), bool)

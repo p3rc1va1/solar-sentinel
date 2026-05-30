@@ -1,6 +1,5 @@
 """Solar Sentinel — FastAPI application entry point."""
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,11 +13,14 @@ from app.config import Settings
 from app.core.camera import Camera
 from app.core.demo import populate_demo_data
 from app.core.detector import Detection, Detector
+from app.core.digest import DigestScheduler
 from app.core.scheduler import CaptureScheduler
 from app.core.sensor import DHTSensor
+from app.core.sensor_watcher import SensorWatcher
 from app.core.triage import TriageAgent
 from app.db.database import Database
 from app.services.gemini import GeminiClient
+from app.services.geocoding import GeocodingService
 from app.services.notifications import NotificationService
 from app.services.weather import WeatherService
 
@@ -115,10 +117,11 @@ def _build_high_detection_callback(
                     planner_output_json=result.get("planner_output_json"),
                 )
 
-                # Track Gemini usage
+                # Track Gemini usage with the real total from crew.usage_metrics
+                usage = result.get("usage") or {}
                 await db.log_gemini_usage(
-                    model_name=gemini.ranked_models[0].name if gemini.ranked_models else "unknown",
-                    tokens_used=0,  # CrewAI doesn't expose token count
+                    model_name=usage.get("model_name") or "unknown",
+                    tokens_used=int(usage.get("total_tokens", 0)),
                     success=True,
                 )
 
@@ -135,6 +138,12 @@ def _build_high_detection_callback(
 
         except Exception as e:
             logger.error("High detection pipeline error: %s", e, exc_info=True)
+            try:
+                await db.log_gemini_usage(
+                    model_name="unknown", tokens_used=0, success=False
+                )
+            except Exception:  # nosec
+                pass
 
     return on_high_detection
 
@@ -163,7 +172,7 @@ async def lifespan(app: FastAPI):
     db_file = "solar_sentinel_demo.db" if s.demo_mode else "solar_sentinel.db"
     db = Database(s.data_dir / db_file)
     await db.connect()
-    
+
     if s.demo_mode:
         await populate_demo_data(db)
 
@@ -199,6 +208,10 @@ async def lifespan(app: FastAPI):
     weather = WeatherService(latitude=s.weather_latitude, longitude=s.weather_longitude)
     await weather.start()
 
+    # Geocoding (city search for the Settings UI)
+    geocoding = GeocodingService()
+    await geocoding.start()
+
     # DHT22 Sensor
     sensor = DHTSensor()
     sensor.start()
@@ -221,21 +234,52 @@ async def lifespan(app: FastAPI):
         on_medium_detection=on_medium,
     )
 
+    # Sensor-driven trigger
+    sensor_watcher = SensorWatcher(sensor=sensor, scheduler=scheduler, settings=s)
+
+    # Daily MEDIUM digest
+    digest_scheduler = DigestScheduler(db=db, gemini=gemini, notif=notif, settings=s)
+
+    # Apply persisted user settings (DB) onto the live Settings instance.
+    # Best-effort: a fresh install with no DB row falls through silently.
+    try:
+        raw = await db.get_setting("user_settings")
+        if raw:
+            import json as _json
+
+            from app.api.routes.settings import _apply_to_runtime_settings
+            from app.models.settings import AllSettings
+            all_settings = AllSettings(**_json.loads(raw))
+            _apply_to_runtime_settings(s, all_settings)
+            notif.update_settings(**all_settings.notifications.model_dump())
+    except Exception as e:
+        logger.warning("Failed to load persisted settings: %s", e)
+
     # Register all deps via DI
-    init_deps(db, s, cam, detector, triage, gemini, notif, weather, scheduler, sensor)
+    init_deps(
+        db, s, cam, detector, triage, gemini, notif, weather, geocoding,
+        scheduler, sensor, sensor_watcher, digest_scheduler,
+    )
 
     # Start scheduler (skip in demo mode — no real camera)
     if not s.demo_mode:
         await scheduler.start()
-        logger.info("Capture scheduler started")
+        await sensor_watcher.start()
+        await digest_scheduler.start()
+        logger.info("Capture scheduler, sensor watcher, and digest scheduler started")
 
     logger.info("Solar Sentinel ready")
     yield
 
     # Shutdown
     logger.info("Solar Sentinel shutting down...")
+    if digest_scheduler.is_running:
+        await digest_scheduler.stop()
+    if sensor_watcher.is_running:
+        await sensor_watcher.stop()
     if scheduler.is_running:
         await scheduler.stop()
+    await geocoding.stop()
     await weather.stop()
     sensor.stop()
     await cam.stop()
@@ -258,9 +302,12 @@ app.include_router(reports.router)
 app.include_router(settings.router)
 
 # Import and register new routes
-from app.api.routes import images, sensor as sensor_route
+from app.api.routes import geocode, images
+from app.api.routes import sensor as sensor_route
+
 app.include_router(images.router)
 app.include_router(sensor_route.router)
+app.include_router(geocode.router)
 
 # Static UI files
 ui_dir = BASE_DIR / "ui"
@@ -270,16 +317,17 @@ if ui_dir.exists():
 if __name__ == "__main__":
     import argparse
     import os
+
     import uvicorn
-    
+
     parser = argparse.ArgumentParser(description="Solar Sentinel")
     parser.add_argument("--demo", action="store_true", help="Run with fake demo data in a separate database")
     parser.add_argument("--host", default="0.0.0.0", help="Host IP")
     parser.add_argument("--port", type=int, default=8000, help="Port")
     args = parser.parse_args()
-    
+
     if args.demo:
         os.environ["DEMO_MODE"] = "1"
-        
+
     uvicorn.run("app.main:app", host=args.host, port=args.port)
 

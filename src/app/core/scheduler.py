@@ -6,20 +6,19 @@ adaptive frequency based on recent detection results.
 
 import asyncio
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image
 
 from app.config import Settings
+from app.core import solar
 from app.core.camera import Camera
 from app.core.detector import Detection, Detector
 from app.core.triage import TriageAgent, check_frame_quality
 from app.db.database import Database
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SUNRISE = time(6, 0)
-DEFAULT_SUNSET = time(20, 0)
 
 
 class CaptureScheduler:
@@ -47,6 +46,7 @@ class CaptureScheduler:
         self._task: asyncio.Task | None = None
         self._current_interval = settings.capture_interval_minutes
         self._consecutive_clean = 0
+        self._daylight_warning_logged = False
 
     @property
     def is_running(self) -> bool:
@@ -57,9 +57,31 @@ class CaptureScheduler:
         return self._current_interval
 
     def _is_daylight(self) -> bool:
-        """Check if current time is within daylight hours."""
-        now = datetime.now().time()
-        return DEFAULT_SUNRISE <= now <= DEFAULT_SUNSET
+        """Check if current time is within daylight hours at the configured site.
+
+        Uses NOAA solar calculation when latitude/longitude are configured.
+        Falls back to "always daylight" with a one-shot warning if coords
+        are missing or unparseable so a fresh install still works while the
+        user configures the location.
+        """
+        try:
+            lat = float(self.settings.weather_latitude)
+            lon = float(self.settings.weather_longitude)
+        except (TypeError, ValueError):
+            if not self._daylight_warning_logged:
+                logger.warning(
+                    "weather_latitude/longitude not configured — assuming always daylight"
+                )
+                self._daylight_warning_logged = True
+            return True
+
+        try:
+            tz = ZoneInfo(self.settings.weather_timezone or "UTC")
+        except ZoneInfoNotFoundError:
+            tz = ZoneInfo("UTC")
+
+        now = datetime.now(tz)
+        return solar.is_daylight(lat, lon, now, tz)
 
     async def start(self) -> None:
         """Start the capture loop."""

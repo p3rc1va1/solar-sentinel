@@ -26,11 +26,14 @@ try:
 except ImportError:
     _HAS_PICAMERA = False
 
-# Color palette for detection classes
+# Color palette for detection classes (binary: defect / healthy).
+# Sub-types ('damage', 'blockage') are kept as fallbacks so older DB rows
+# still render correctly during the migration period.
 _CLASS_COLORS = {
-    "damage": (239, 68, 68),     # red
-    "blockage": (245, 158, 11),  # amber
+    "defect": (239, 68, 68),     # red
     "healthy": (34, 197, 94),    # green
+    "damage": (239, 68, 68),     # legacy
+    "blockage": (245, 158, 11),  # legacy
 }
 _DEFAULT_COLOR = (59, 130, 246)  # blue
 

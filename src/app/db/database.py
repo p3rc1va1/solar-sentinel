@@ -53,8 +53,19 @@ CREATE TABLE IF NOT EXISTS gemini_usage (
     success INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS digests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    detection_count INTEGER NOT NULL,
+    detection_ids_json TEXT NOT NULL,
+    summary_markdown TEXT NOT NULL,
+    sent_email INTEGER NOT NULL DEFAULT 0,
+    sent_telegram INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_detections_timestamp ON detections(timestamp);
 CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at);
+CREATE INDEX IF NOT EXISTS idx_digests_created_at ON digests(created_at);
 """
 
 
@@ -247,3 +258,72 @@ class Database:
             (today,),
         )
         return [dict(row) for row in await cursor.fetchall()]
+
+    # ── Digests (MEDIUM detection daily digest) ─────────────────────────
+
+    async def get_medium_detections_since(
+        self, since: datetime, conf_medium: float, conf_high: float
+    ) -> list[dict]:
+        """Detections in the MEDIUM band since `since` (UTC)."""
+        cursor = await self.db.execute(
+            """SELECT * FROM detections
+               WHERE confidence >= ? AND confidence < ?
+                 AND timestamp >= ?
+               ORDER BY timestamp ASC""",
+            (conf_medium, conf_high, since.isoformat()),
+        )
+        return [self._row_to_detection(row) for row in await cursor.fetchall()]
+
+    async def insert_digest(
+        self,
+        detection_ids: list[int],
+        summary_markdown: str,
+        sent_email: bool,
+        sent_telegram: bool,
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO digests
+               (detection_count, detection_ids_json, summary_markdown,
+                sent_email, sent_telegram)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                len(detection_ids),
+                json.dumps(detection_ids),
+                summary_markdown,
+                1 if sent_email else 0,
+                1 if sent_telegram else 0,
+            ),
+        )
+        await self.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def list_digests(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM digests ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_digest(self, digest_id: int) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM digests WHERE id = ?", (digest_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_last_digest_created_at(self) -> datetime | None:
+        cursor = await self.db.execute(
+            "SELECT created_at FROM digests ORDER BY created_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        # SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" without tz.
+        ts = str(row["created_at"])
+        try:
+            dt = datetime.fromisoformat(ts.replace(" ", "T"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt

@@ -15,6 +15,7 @@ from app.core.triage import TriageAgent
 from app.db.database import Database
 from app.main import app
 from app.services.gemini import GeminiClient
+from app.services.geocoding import GeocodingService
 from app.services.notifications import NotificationService
 from app.services.weather import WeatherService
 
@@ -32,8 +33,11 @@ async def setup_deps(tmp_path):
     gemini = GeminiClient(api_key="")
     notif = NotificationService()
     weather = WeatherService()
+    geocoding = GeocodingService()
 
-    deps.init_deps(db, settings, camera, detector, triage, gemini, notif, weather)
+    deps.init_deps(
+        db, settings, camera, detector, triage, gemini, notif, weather, geocoding
+    )
 
     yield db, settings
     await db.disconnect()
@@ -264,3 +268,39 @@ class TestReportDetail:
         resp = await client.get(f"/reports/{report_id}")
         assert resp.status_code == 200
         assert resp.json()["severity"] == "WARNING"
+
+
+class TestGeocodeEndpoint:
+    @pytest.mark.asyncio
+    async def test_missing_q(self, client):
+        resp = await client.get("/geocode")
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_short_q_returns_empty(self, client):
+        # `q=a` passes the route min_length=1 validator, but the service
+        # short-circuits anything shorter than 2 chars.
+        resp = await client.get("/geocode?q=a")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_search_returns_matches(self, client):
+        # Patch the geocoding service's HTTP call.
+        from app.api import deps
+        svc = deps._geocoding
+        fake_resp = MagicMock()
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {
+            "results": [{
+                "name": "Vilnius", "country": "Lithuania", "admin1": "Vilnius",
+                "latitude": 54.6872, "longitude": 25.2797, "timezone": "Europe/Vilnius",
+            }]
+        }
+        with patch.object(svc, "_client", AsyncMock()) as fake_client:
+            fake_client.get = AsyncMock(return_value=fake_resp)
+            resp = await client.get("/geocode?q=Vilnius")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body) == 1
+        assert body[0]["name"] == "Vilnius"

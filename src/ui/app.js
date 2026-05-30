@@ -94,10 +94,13 @@ function severityBadge(severity) {
 }
 
 function classBadge(className) {
+    // Binary detector: 'defect' / 'healthy'. Older 'damage'/'blockage' rows
+    // map onto 'defect' so legacy DBs still render correctly.
     const cls = {
-        'damage': 'badge-damage',
-        'blockage': 'badge-blockage',
+        'defect': 'badge-defect',
         'healthy': 'badge-healthy',
+        'damage': 'badge-defect',
+        'blockage': 'badge-defect',
     }[className] || 'badge-info';
     return `<span class="badge ${cls}">${className}</span>`;
 }
@@ -115,24 +118,28 @@ let trendChart = null;
 let classChart = null;
 
 function initCharts(detections) {
-    // Detection trend — count detections per day for the last 7 days
+    // Detection trend — count detections per day for the last 7 days.
+    // Binary detector emits 'defect' / 'healthy'; legacy class names are
+    // folded onto 'defect' so older rows show up in the right bucket.
     const now = new Date();
     const days = [];
     const dayCounts = {};
+
+    const _bucket = (cls) => (cls === 'healthy' ? 'healthy' : 'defect');
 
     for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         const key = d.toISOString().slice(0, 10);
         days.push(key);
-        dayCounts[key] = { damage: 0, blockage: 0, healthy: 0 };
+        dayCounts[key] = { defect: 0, healthy: 0 };
     }
 
     (detections || []).forEach(d => {
         if (!d.timestamp) return;
         const key = new Date(d.timestamp).toISOString().slice(0, 10);
-        if (dayCounts[key] && dayCounts[key][d.defect_class] !== undefined) {
-            dayCounts[key][d.defect_class]++;
+        if (dayCounts[key]) {
+            dayCounts[key][_bucket(d.defect_class)]++;
         }
     });
 
@@ -150,15 +157,9 @@ function initCharts(detections) {
             labels,
             datasets: [
                 {
-                    label: 'Damage',
-                    data: days.map(d => dayCounts[d].damage),
+                    label: 'Defect',
+                    data: days.map(d => dayCounts[d].defect),
                     backgroundColor: 'rgba(239, 68, 68, 0.7)',
-                    borderRadius: 4,
-                },
-                {
-                    label: 'Blockage',
-                    data: days.map(d => dayCounts[d].blockage),
-                    backgroundColor: 'rgba(245, 158, 11, 0.7)',
                     borderRadius: 4,
                 },
                 {
@@ -193,10 +194,10 @@ function initCharts(detections) {
         },
     });
 
-    // Class distribution donut
-    const classCounts = { damage: 0, blockage: 0, healthy: 0 };
+    // Class distribution donut (binary)
+    const classCounts = { defect: 0, healthy: 0 };
     (detections || []).forEach(d => {
-        if (classCounts[d.defect_class] !== undefined) classCounts[d.defect_class]++;
+        classCounts[_bucket(d.defect_class)]++;
     });
 
     const classCtx = document.getElementById('chartClasses');
@@ -204,12 +205,11 @@ function initCharts(detections) {
     classChart = new Chart(classCtx, {
         type: 'doughnut',
         data: {
-            labels: ['Damage', 'Blockage', 'Healthy'],
+            labels: ['Defect', 'Healthy'],
             datasets: [{
-                data: [classCounts.damage, classCounts.blockage, classCounts.healthy],
+                data: [classCounts.defect, classCounts.healthy],
                 backgroundColor: [
                     'rgba(239, 68, 68, 0.8)',
-                    'rgba(245, 158, 11, 0.8)',
                     'rgba(34, 197, 94, 0.8)',
                 ],
                 borderColor: '#1a2035',
@@ -532,6 +532,27 @@ async function loadSettings() {
     document.getElementById('confHighVal').textContent = d.confidence_high || 0.70;
     document.getElementById('confMedium').value = d.confidence_medium || 0.45;
     document.getElementById('confMediumVal').textContent = d.confidence_medium || 0.45;
+
+    // Sensor triggers
+    document.getElementById('sensorTriggerEnabled').checked = d.sensor_trigger_enabled !== false;
+    document.getElementById('sensorTempHigh').value = d.sensor_temp_high_c ?? 35.0;
+    document.getElementById('sensorTempLow').value = d.sensor_temp_low_c ?? 0.0;
+    document.getElementById('sensorHumidityHigh').value = d.sensor_humidity_high_pct ?? 85.0;
+    const cooldown = d.sensor_trigger_cooldown_minutes ?? 15;
+    document.getElementById('sensorCooldown').value = cooldown;
+    document.getElementById('sensorCooldownVal').textContent = cooldown;
+
+    // Location
+    const loc = data.location || {};
+    document.getElementById('locationLabel').value = loc.location_label || '';
+    document.getElementById('weatherLat').value = loc.weather_latitude || '';
+    document.getElementById('weatherLon').value = loc.weather_longitude || '';
+    document.getElementById('weatherTz').value = loc.weather_timezone || 'UTC';
+
+    // Daily digest
+    const dig = data.digest || {};
+    document.getElementById('digestEnabled').checked = dig.digest_enabled !== false;
+    document.getElementById('digestTime').value = dig.digest_time_local || '20:00';
 }
 
 // Range slider live values
@@ -541,6 +562,49 @@ document.getElementById('confHigh').addEventListener('input', (e) => {
 document.getElementById('confMedium').addEventListener('input', (e) => {
     document.getElementById('confMediumVal').textContent = e.target.value;
 });
+document.getElementById('sensorCooldown').addEventListener('input', (e) => {
+    document.getElementById('sensorCooldownVal').textContent = e.target.value;
+});
+
+// City search → /geocode
+let _citySearchTimer = null;
+const citySearchInput = document.getElementById('citySearch');
+const citySearchResults = document.getElementById('citySearchResults');
+if (citySearchInput) {
+    citySearchInput.addEventListener('input', (e) => {
+        const q = e.target.value.trim();
+        clearTimeout(_citySearchTimer);
+        if (q.length < 2) {
+            citySearchResults.innerHTML = '';
+            return;
+        }
+        _citySearchTimer = setTimeout(async () => {
+            try {
+                const resp = await fetch(`${API}/geocode?q=${encodeURIComponent(q)}&limit=5`);
+                if (!resp.ok) return;
+                const matches = await resp.json();
+                citySearchResults.innerHTML = '';
+                for (const m of matches) {
+                    const row = document.createElement('div');
+                    row.className = 'search-result';
+                    const region = [m.admin1, m.country].filter(Boolean).join(', ');
+                    row.textContent = region ? `${m.name} — ${region}` : m.name;
+                    row.addEventListener('click', () => {
+                        document.getElementById('locationLabel').value = region ? `${m.name}, ${region}` : m.name;
+                        document.getElementById('weatherLat').value = String(m.latitude);
+                        document.getElementById('weatherLon').value = String(m.longitude);
+                        document.getElementById('weatherTz').value = m.timezone || 'UTC';
+                        citySearchResults.innerHTML = '';
+                        citySearchInput.value = '';
+                    });
+                    citySearchResults.appendChild(row);
+                }
+            } catch (err) {
+                // Silent — leave the previous selection alone.
+            }
+        }, 250);
+    });
+}
 
 // Save settings
 document.getElementById('btnSaveSettings').addEventListener('click', async () => {
@@ -565,6 +629,21 @@ document.getElementById('btnSaveSettings').addEventListener('click', async () =>
             capture_interval_minutes: 15,
             capture_interval_after_high: 5,
             capture_interval_after_clean: 30,
+            sensor_trigger_enabled: document.getElementById('sensorTriggerEnabled').checked,
+            sensor_temp_high_c: parseFloat(document.getElementById('sensorTempHigh').value),
+            sensor_temp_low_c: parseFloat(document.getElementById('sensorTempLow').value),
+            sensor_humidity_high_pct: parseFloat(document.getElementById('sensorHumidityHigh').value),
+            sensor_trigger_cooldown_minutes: parseInt(document.getElementById('sensorCooldown').value),
+        },
+        location: {
+            weather_latitude: document.getElementById('weatherLat').value,
+            weather_longitude: document.getElementById('weatherLon').value,
+            weather_timezone: document.getElementById('weatherTz').value || 'UTC',
+            location_label: document.getElementById('locationLabel').value,
+        },
+        digest: {
+            digest_enabled: document.getElementById('digestEnabled').checked,
+            digest_time_local: document.getElementById('digestTime').value || '20:00',
         },
     };
 

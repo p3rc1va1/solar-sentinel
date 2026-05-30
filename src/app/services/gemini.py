@@ -38,9 +38,19 @@ class GeminiClient:
 
     async def generate(self, prompt: str) -> str:
         """Generate content, falling back through ranked models on quota errors."""
+        text, _, _ = await self.generate_with_usage(prompt)
+        return text
+
+    async def generate_with_usage(self, prompt: str) -> tuple[str, int, str]:
+        """Generate content and return (text, total_tokens, model_name).
+
+        `total_tokens` is 0 when the response carries no usage metadata or
+        when all models are exhausted; `model_name` is the model that
+        returned the text, or "unknown" on full fallback.
+        """
         if not self._configured or not self._client or not self.ranked_models:
             logger.error("Gemini client not configured or no models available")
-            return self._template_response()
+            return self._template_response(), 0, "unknown"
 
         for model_info in self.ranked_models:
             try:
@@ -51,7 +61,8 @@ class GeminiClient:
 
                 if response.text:
                     logger.info("Gemini response from %s", model_info.name)
-                    return response.text
+                    total = _extract_total_tokens(response)
+                    return response.text, total, model_info.name
                 else:
                     logger.warning("Empty response from %s", model_info.name)
                     continue
@@ -76,7 +87,7 @@ class GeminiClient:
                 continue
 
         logger.error("All Gemini models exhausted — returning template response")
-        return self._template_response()
+        return self._template_response(), 0, "unknown"
 
     def _template_response(self) -> str:
         """Fallback template when all models are exhausted."""
@@ -87,3 +98,17 @@ class GeminiClient:
             '"preliminary_recommendation": "Schedule manual inspection at earliest convenience.", '
             '"confidence_assessment": "Low — automated analysis unavailable"}'
         )
+
+
+def _extract_total_tokens(response) -> int:
+    """Pull the total token count off a google.genai response, if present."""
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return 0
+    total = getattr(usage, "total_token_count", None)
+    if total is None:
+        # Some SDK versions split into prompt + candidates; fall back to sum.
+        prompt = getattr(usage, "prompt_token_count", 0) or 0
+        cand = getattr(usage, "candidates_token_count", 0) or 0
+        return int(prompt + cand)
+    return int(total)

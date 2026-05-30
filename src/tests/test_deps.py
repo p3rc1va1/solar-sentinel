@@ -9,6 +9,7 @@ from app.core.detector import Detector
 from app.core.triage import TriageAgent
 from app.db.database import Database
 from app.services.gemini import GeminiClient
+from app.services.geocoding import GeocodingService
 from app.services.notifications import NotificationService
 from app.services.weather import WeatherService
 
@@ -24,6 +25,11 @@ class TestDeps:
         deps._gemini = None
         deps._notifications = None
         deps._weather = None
+        deps._geocoding = None
+        deps._scheduler = None
+        deps._sensor = None
+        deps._sensor_watcher = None
+        deps._digest_scheduler = None
 
     def test_get_before_init_raises(self):
         with pytest.raises(RuntimeError, match="Database not initialized"):
@@ -47,8 +53,11 @@ class TestDeps:
         gemini = GeminiClient(api_key="")
         notif = NotificationService()
         weather = WeatherService()
+        geocoding = GeocodingService()
 
-        deps.init_deps(db, settings, camera, detector, triage, gemini, notif, weather)
+        deps.init_deps(
+            db, settings, camera, detector, triage, gemini, notif, weather, geocoding
+        )
 
         assert deps.get_db() is db
         assert deps.get_settings() is settings
@@ -58,3 +67,4 @@ class TestDeps:
         assert deps.get_gemini() is gemini
         assert deps.get_notifications() is notif
         assert deps.get_weather() is weather
+        assert deps.get_geocoding() is geocoding

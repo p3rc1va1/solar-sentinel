@@ -213,8 +213,20 @@ def stratify_and_write(merged_df: pd.DataFrame, merged_dir: Path) -> pd.DataFram
         dst_lbl = merged_dir / "labels" / row["split"] / (safe.rsplit(".", 1)[0] + ".txt")
         shutil.copy2(src, dst_img)
         if row["boxes"]:
-            lines = [f"0 {b[0]} {b[1]} {b[2]} {b[3]}" for _sub, b in row["boxes"]]
-            dst_lbl.write_text("\n".join(lines) + "\n")
+            # Canonical-union label policy: one box per image = bounding rect
+            # of all original defect boxes.
+            bboxes = [b for _sub, b in row["boxes"]]
+            x1s = [b[0] - b[2] / 2 for b in bboxes]
+            y1s = [b[1] - b[3] / 2 for b in bboxes]
+            x2s = [b[0] + b[2] / 2 for b in bboxes]
+            y2s = [b[1] + b[3] / 2 for b in bboxes]
+            x1, y1 = max(0.0, min(x1s)), max(0.0, min(y1s))
+            x2, y2 = min(1.0, max(x2s)), min(1.0, max(y2s))
+            x_c, y_c, w, h = (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1
+            if w > 1e-4 and h > 1e-4:
+                dst_lbl.write_text(f"0 {x_c} {y_c} {w} {h}\n")
+            else:
+                dst_lbl.write_text("")
         else:
             dst_lbl.write_text("")
     return out
@@ -313,6 +325,14 @@ def main() -> int:
         for lbl in (merged_dir / "labels").rglob("*.txt"):
             for line in lbl.read_text().strip().splitlines():
                 assert line.split()[0] == "0", f"non-binary label in {lbl}: {line!r}"
+
+        # Canonical-union policy: every non-empty label file has exactly 1 box
+        for lbl in (merged_dir / "labels").rglob("*.txt"):
+            text = lbl.read_text().strip()
+            if not text:
+                continue
+            n_boxes = len(text.splitlines())
+            assert n_boxes == 1, f"{lbl} has {n_boxes} boxes; expected 1 (union policy)"
 
         # data.yaml shape
         yaml_path = merged_dir / "solar_sentinel.yaml"

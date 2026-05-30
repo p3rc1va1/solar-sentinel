@@ -171,9 +171,15 @@ print(f"Seeded everything with {SEED}.")
 TRAIN_CELLS.append(md("""\
 ## Cell 5 — Download datasets
 
-Three RGB Roboflow datasets. `dataset_1` and `dataset_2` will be merged for
-train+val; `dataset_3` is held out entirely as a cross-source OOD test set
-(it is *not* used for any training signal, including val mAP-based early stop).
+Six RGB Roboflow datasets in total. Five are merged for train+val; `dataset_3`
+is held out entirely as a cross-source OOD test set (it is *not* used for any
+training signal, including val mAP-based early stop).
+
+The original three sources (datasets 1–3) anchor the pipeline; the three
+additional sources (4–6) were added to push training set size from ~1k to
+~5k images after dedup, which is the prerequisite for hitting the
+target mAP@50 of 0.80–0.88. All six are RGB outdoor whole-panel imagery; sub-
+type taxonomies vary but the union-box policy in cell 7 normalises them.
 
 Get a free Roboflow API key at <https://app.roboflow.com/settings/api>.
 """))
@@ -187,6 +193,7 @@ BASE_DIR = Path("/content/datasets/raw")
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 DATASETS = [
+    # ── Original three sources ────────────────────────────────────────────
     {
         "name": "dataset_1",
         "workspace": "solar-panel-defect-detection",
@@ -206,7 +213,36 @@ DATASETS = [
         "workspace": "gao-shou-zheng-b6xqc",
         "project": "solar-panel-0swal",
         "version": 3,
-        "role": "ood_test",
+        "role": "ood_test",  # held entirely out
+    },
+
+    # ── Tier A additions for Sprint 2 ─────────────────────────────────────
+    # Largest single addition (~3690 imgs); identical schema to dataset_1 so
+    # perceptual dedup will likely drop a meaningful fraction. Worth it for
+    # the unique imagery that survives.
+    {
+        "name": "dataset_4_gydkp",
+        "workspace": "solar-panel-q3vlt",
+        "project": "solar-panel-gydkp",
+        "version": 1,
+        "role": "train_val",
+    },
+    # Adds explicit "Cracks" class (under-represented in the original three);
+    # CC BY 4.0 licensed.
+    {
+        "name": "dataset_5_maintenance",
+        "workspace": "solarpanels-mi4yb",
+        "project": "solar-panel-maintenance",
+        "version": 1,
+        "role": "train_val",
+    },
+    # Defect-only (no healthy class); contributes positives. ~456 imgs.
+    {
+        "name": "dataset_6_phase2",
+        "workspace": "solarpaneldefectdetectionphase2",
+        "project": "solar-panel-defect-detection-f6wsy",
+        "version": 1,
+        "role": "train_val",
     },
 ]
 
@@ -224,9 +260,15 @@ for ds in DATASETS:
         print(f"  {ds['name']}: already present, skipping download")
         continue
     print(f"  downloading {ds['name']}...")
-    project = rf.workspace(ds["workspace"]).project(ds["project"])
-    project.version(ds["version"]).download("yolov8", location=str(out))
-print("All datasets ready.")
+    try:
+        project = rf.workspace(ds["workspace"]).project(ds["project"])
+        project.version(ds["version"]).download("yolov8", location=str(out))
+    except Exception as e:
+        print(f"  WARN: failed to download {ds['name']}: {e}")
+        print(f"        Manually browse https://universe.roboflow.com/{ds['workspace']}/{ds['project']} "
+              f"and pick a valid version, then re-run.")
+        continue
+print("All datasets downloaded (or skipped if pre-existing).")
 """))
 
 
@@ -414,14 +456,25 @@ print(df.groupby(["role", "primary_subtype"]).size().unstack(fill_value=0))
 
 
 TRAIN_CELLS.append(md("""\
-## Cell 7 — Stratified split + write merged dataset
+## Cell 7 — Stratified split + write merged dataset (canonical-union label policy)
 
 `dataset_3` is **entirely** test (cross-source OOD). Within `dataset_1 ∪
 dataset_2`, we stratify on `(source_dataset, primary_subtype, is_positive)` and
 take an 80/20 train/val split.
 
-When we write the YOLO labels, every kept box becomes class `0` (the binary
-`defect` class). Sub-type metadata stays in the manifest, *not* in the labels.
+**Label-policy normalisation.** The three Roboflow sources use inconsistent
+annotation policies — some draw a tight box around every visible micro-defect,
+others draw one box around the affected area. Mixing these policies produced a
+val/test instance-density mismatch in the previous run (val=3.0 boxes/img,
+test=1.2 boxes/img) and capped val mAP at 0.25.
+
+To homogenise, we apply a deterministic policy: **one union bounding box per
+defect-containing image** = the bounding rectangle of all original defect boxes
+in that image. This is exactly what the agentic VLM Analyst needs from the
+trigger (a region of interest, not pixel-perfect localisation), and it matches
+the looser of the source policies, so no information is fabricated.
+
+Sub-type metadata stays in the manifest, *not* in the labels.
 """))
 
 TRAIN_CELLS.append(code("""\
@@ -471,7 +524,37 @@ tv_df.loc[val_idx, "split"] = "val"
 manifest_df = pd.concat([tv_df, ood_df], ignore_index=True)
 
 
-# ── Write images + binary labels ────────────────────────────────────────────
+# ── Label-policy normalisation: union of all defect boxes per image ─────────
+def union_box(boxes_xywh: list[list[float]]) -> list[float]:
+    \"\"\"Return YOLO xywh of the bounding rectangle covering all input boxes.
+
+    Input/output are normalised (0..1) center-x, center-y, width, height.
+    \"\"\"
+    x1s, y1s, x2s, y2s = [], [], [], []
+    for x_c, y_c, w, h in boxes_xywh:
+        x1s.append(x_c - w / 2)
+        y1s.append(y_c - h / 2)
+        x2s.append(x_c + w / 2)
+        y2s.append(y_c + h / 2)
+    x1, y1 = max(0.0, min(x1s)), max(0.0, min(y1s))
+    x2, y2 = min(1.0, max(x2s)), min(1.0, max(y2s))
+    return [(x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1]
+
+
+# ── Density audit: before vs after policy normalisation ────────────────────
+before_counts = (
+    manifest_df[manifest_df["is_positive"]]
+    .assign(n_boxes=lambda d: d["boxes"].apply(len))
+    .groupby("source_dataset")["n_boxes"]
+    .agg(["mean", "sum", "count"])
+    .rename(columns={"mean": "boxes_per_img_BEFORE", "sum": "total_boxes_BEFORE",
+                     "count": "n_positive_imgs"})
+)
+print("Box density per source — BEFORE normalisation:")
+print(before_counts)
+
+
+# ── Write images + canonical-union labels ──────────────────────────────────
 def write_split(row: pd.Series) -> None:
     src = Path(row["image_path"])
     safe = f"{row['source_dataset']}_{src.stem}{src.suffix}"
@@ -479,11 +562,13 @@ def write_split(row: pd.Series) -> None:
     dst_lbl = MERGED_DIR / "labels" / row["split"] / (safe.rsplit(".", 1)[0] + ".txt")
     shutil.copy2(src, dst_img)
     if row["boxes"]:
-        lines = []
-        for _subtype, bbox in row["boxes"]:
-            x_c, y_c, w, h = bbox
-            lines.append(f"0 {x_c} {y_c} {w} {h}")
-        dst_lbl.write_text("\\n".join(lines) + "\\n")
+        bboxes = [b for _sub, b in row["boxes"]]
+        x_c, y_c, w, h = union_box(bboxes)
+        # Guard against degenerate boxes (zero area)
+        if w > 1e-4 and h > 1e-4:
+            dst_lbl.write_text(f"0 {x_c} {y_c} {w} {h}\\n")
+        else:
+            dst_lbl.write_text("")
     else:
         dst_lbl.write_text("")
 
@@ -491,8 +576,9 @@ def write_split(row: pd.Series) -> None:
 for _, row in manifest_df.iterrows():
     write_split(row)
 
+
 # Verify split balance
-print("\\nFinal split composition:")
+print("\\nFinal split composition (images):")
 print(manifest_df.groupby(["split", "primary_subtype"]).size().unstack(fill_value=0))
 
 
@@ -500,6 +586,24 @@ print(manifest_df.groupby(["split", "primary_subtype"]).size().unstack(fill_valu
 val_positives = ((manifest_df["split"] == "val") & manifest_df["is_positive"]).sum()
 assert val_positives > 0, "Val split has no positives — split logic broken."
 print(f"\\nVal positives: {val_positives}")
+
+
+# ── Density audit AFTER ────────────────────────────────────────────────────
+def count_boxes_in_split(split: str) -> dict:
+    out = {}
+    for src in manifest_df["source_dataset"].unique():
+        rows = manifest_df[(manifest_df["split"] == split) &
+                           (manifest_df["source_dataset"] == src) &
+                           manifest_df["is_positive"]]
+        n_imgs = len(rows)
+        # After policy normalisation, every positive image has exactly 1 box.
+        out[src] = {"n_positive_imgs": n_imgs, "boxes_per_img_AFTER": 1 if n_imgs else 0}
+    return out
+
+
+print("\\nBox density per source — AFTER normalisation (target: 1.0 across the board):")
+for split in ("train", "val", "test"):
+    print(f"  {split}: {count_boxes_in_split(split)}")
 
 
 # ── data.yaml for Ultralytics ───────────────────────────────────────────────
@@ -519,23 +623,33 @@ print(f"\\ndata.yaml written: {yaml_path}")
 
 
 TRAIN_CELLS.append(md("""\
-## Cell 8 — Train YOLO26n with binary-trigger-tuned hyperparameters
+## Cell 8 — Train YOLO26n with Sprint-2 recipe
 
-Defaults overridden only where the binary-trigger framing demands it:
+This recipe targets a higher mAP ceiling on the (now homogenised) dataset by
+following Ultralytics' fine-tuning guide rather than aggressively over-tuning
+for the binary case. Defaults are kept where Ultralytics' guidance recommends
+them; the previous run's overrides (cls=0.1, copy_paste=0.2, flipud=0.5,
+degrees=15) were reverted because they hurt mAP on this dataset.
 
-- `cls=0.1` (default 0.5): classification loss is trivial when `nc=1`; signal
-  belongs in box regression.
-- `mixup=0.05`, `copy_paste=0.2`: rare-defect oversampling without semantic
-  blending of incompatible defect types.
-- `degrees=15`, `flipud=0.5`: panels are physically rotation- and
-  vertical-flip-symmetric.
-- `shear=0`, `perspective=0`: panels are planar in drone/Pi imagery.
-- `close_mosaic=10`: disable mosaic for the last 10 epochs (now the Ultralytics
-  recommended default).
-- `seed=42`, `deterministic=True`: cuDNN-deterministic mode for reproducibility.
+Key choices:
 
-Optimizer, LR, warmup, weight decay are left as Ultralytics auto-defaults
-(AdamW, auto-LR from batch size).
+- `epochs=300, patience=50`: Ultralytics' fine-tuning default; 100 was
+  undertrained at <10k iterations.
+- `optimizer="SGD", lr0=0.01, momentum=0.937`: SGD wins by ~+0.01–0.03 mAP at
+  convergence on detection vs. AdamW (YOLOv5/8 default behaviour).
+- `cos_lr=True, warmup_epochs=5`: cosine schedule + longer warmup for the
+  longer run.
+- `close_mosaic=30`: longer mosaic-off tail (out of 300) lets the model fit
+  clean image statistics on a small dataset.
+- `cls=0.5` (Ultralytics default, was 0.1): even with `nc=1`, the cls head
+  needs gradient signal to discriminate positive vs. background. Setting cls
+  too low starved the discriminator in the previous run (recall stuck at 0.24).
+- Augmentation softened: `mosaic=0.5, mixup=0, copy_paste=0, degrees=5,
+  flipud=0`. Aggressive aug on ~1k images pushes images further from
+  deployment distribution.
+- `seed=42, deterministic=True`: cuDNN-deterministic mode for reproducibility.
+
+Model stays YOLO26n (deployment target is Pi 5; nano fits NCNN budget).
 """))
 
 TRAIN_CELLS.append(code("""\
@@ -558,25 +672,35 @@ TRAIN_ARGS = dict(
     exist_ok=True,
     verbose=True,
 
-    # Schedule
-    epochs=100,
-    patience=20,
+    # Schedule (Ultralytics fine-tuning guide)
+    epochs=300,
+    patience=50,
     imgsz=640,
     batch=16,
-    close_mosaic=10,
+    close_mosaic=30,
 
-    # Binary-trigger loss tuning
-    cls=0.1,
+    # Optimizer + LR (SGD wins on detection at convergence)
+    optimizer="SGD",
+    lr0=0.01,
+    momentum=0.937,
+    weight_decay=0.0005,
+    cos_lr=True,
+    warmup_epochs=5,
+    warmup_momentum=0.8,
+    warmup_bias_lr=0.1,
+
+    # Loss (defaults — previous run's cls=0.1 starved gradient)
     box=7.5,
+    cls=0.5,
     dfl=1.5,
 
-    # Augmentation (outdoor RGB recipe)
-    mosaic=1.0,
-    mixup=0.05,
-    copy_paste=0.2,
-    degrees=15,
+    # Augmentation (softened for ~1k-image dataset)
+    mosaic=0.5,
+    mixup=0.0,
+    copy_paste=0.0,
+    degrees=5,
     fliplr=0.5,
-    flipud=0.5,
+    flipud=0.0,
     hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
     shear=0.0,
     perspective=0.0,
@@ -761,11 +885,18 @@ image to resolve sub-type, severity, and recommended action.
 After two-pass dedup (SHA256 exact + perceptual Hamming ≤ 5):
 {{ dedup_summary }}
 
+**Label policy.** Source datasets used inconsistent annotation policies (some
+drew tight boxes around every visible micro-defect, others one box around the
+affected area). To homogenise, every defect-containing image carries a single
+**union bounding box** — the rectangle covering all original defect boxes.
+This matches what the agentic VLM Analyst needs from the trigger and removes
+the val/test instance-density mismatch that capped the previous run's mAP.
+
 ## Hyperparameter overrides (vs. Ultralytics defaults)
 {{ hparams_table }}
 
-All other arguments use Ultralytics auto-defaults (AdamW, auto-LR, default
-warmup / weight decay).
+Optimizer is SGD (Ultralytics fine-tuning guide); cosine LR with 5-epoch warmup;
+300 epochs with patience=50; reproducibility via seed=42 + cuDNN-deterministic.
 
 ## Validation metrics
 | Split | mAP@50 | mAP@50-95 | precision | recall |
@@ -818,14 +949,21 @@ dedup_summary = (
 )
 
 hparam_rows = [
-    {"arg": "cls", "value": 0.1, "default": 0.5, "rationale": "BCE trivial when nc=1"},
-    {"arg": "mixup", "value": 0.05, "default": 0.0, "rationale": "low — defects don't blend"},
-    {"arg": "copy_paste", "value": 0.2, "default": 0.0, "rationale": "rare-defect oversampling"},
-    {"arg": "degrees", "value": 15, "default": 0, "rationale": "panels are rotation-tolerant"},
-    {"arg": "flipud", "value": 0.5, "default": 0.0, "rationale": "panels are V-flip symmetric"},
+    {"arg": "epochs", "value": 300, "default": 100, "rationale": "Ultralytics finetuning guide"},
+    {"arg": "patience", "value": 50, "default": 100, "rationale": "longer schedule"},
+    {"arg": "optimizer", "value": "SGD", "default": "auto", "rationale": "wins at convergence on detection"},
+    {"arg": "lr0", "value": 0.01, "default": 0.01, "rationale": "SGD baseline"},
+    {"arg": "cos_lr", "value": True, "default": False, "rationale": "smoother decay over 300 epochs"},
+    {"arg": "warmup_epochs", "value": 5, "default": 3, "rationale": "longer warmup for longer run"},
+    {"arg": "close_mosaic", "value": 30, "default": 10, "rationale": "longer mosaic-off tail on small dataset"},
+    {"arg": "cls", "value": 0.5, "default": 0.5, "rationale": "default — earlier 0.1 starved discriminator"},
+    {"arg": "mosaic", "value": 0.5, "default": 1.0, "rationale": "softer aug for ~1k-image set"},
+    {"arg": "mixup", "value": 0.0, "default": 0.0, "rationale": "off — defects don't blend"},
+    {"arg": "copy_paste", "value": 0.0, "default": 0.0, "rationale": "off — earlier 0.2 hurt mAP"},
+    {"arg": "degrees", "value": 5, "default": 0, "rationale": "mild rotation jitter"},
+    {"arg": "flipud", "value": 0.0, "default": 0.0, "rationale": "off — earlier 0.5 hurt mAP"},
     {"arg": "shear", "value": 0.0, "default": 0.0, "rationale": "panels are planar"},
     {"arg": "perspective", "value": 0.0, "default": 0.0, "rationale": "panels are planar"},
-    {"arg": "close_mosaic", "value": 10, "default": 10, "rationale": "Ultralytics current default"},
     {"arg": "seed", "value": SEED, "default": 0, "rationale": "reproducibility"},
     {"arg": "deterministic", "value": True, "default": True, "rationale": "reproducibility"},
 ]

@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     capture_interval_after_high: int = Field(default=5, ge=1)
     capture_interval_after_clean: int = Field(default=30, ge=1)
 
+    # --- Sensor-triggered capture (DHT22) ---
+    sensor_trigger_enabled: bool = True
+    sensor_temp_high_c: float = Field(default=35.0)
+    sensor_temp_low_c: float = Field(default=0.0)
+    sensor_humidity_high_pct: float = Field(default=85.0, ge=0.0, le=100.0)
+    sensor_trigger_cooldown_minutes: int = Field(default=15, ge=1)
+
+    # --- MEDIUM detection daily digest ---
+    digest_enabled: bool = True
+    digest_time_local: str = "20:00"  # HH:MM, validated at use-site
+
     # --- YOLO Model ---
     yolo_model_path: str = "data/models/best.pt"
     yolo_input_size: int = 640

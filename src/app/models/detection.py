@@ -19,8 +19,7 @@ class Urgency(str, Enum):
 
 
 class DefectClass(str, Enum):
-    DAMAGE = "damage"
-    BLOCKAGE = "blockage"
+    DEFECT = "defect"
     HEALTHY = "healthy"
 
 

@@ -70,6 +70,7 @@ class SolarSentinelCrew:
 
     def __init__(self, gemini_client: GeminiClient) -> None:
         self.gemini_client = gemini_client
+        self._last_model_name: str = "unknown"
 
     @property
     def agents_config(self) -> dict:
@@ -84,6 +85,7 @@ class SolarSentinelCrew:
         if not self.gemini_client.ranked_models:
             return None
         best = self.gemini_client.ranked_models[0]
+        self._last_model_name = best.name
         return LLM(
             model=f"gemini/{best.name}",
             api_key=self.gemini_client.api_key,
@@ -224,12 +226,23 @@ class SolarSentinelCrew:
                 )
 
                 crew.kickoff()
-                return self._parse_result(
+                result = self._parse_result(
                     analyze_task, planning_task, write_task, qa_task
                 )
+                result["usage"] = self._extract_usage(crew)
+                return result
         except Exception as e:
             logger.error("CrewAI pipeline failed: %s", e, exc_info=True)
             return self._fallback_result(defect_class, confidence)
+
+    def _extract_usage(self, crew) -> dict:
+        """Pull total tokens off crew.usage_metrics; never raises."""
+        try:
+            usage = getattr(crew, "usage_metrics", None)
+            total = int(getattr(usage, "total_tokens", 0) or 0) if usage else 0
+        except Exception:
+            total = 0
+        return {"total_tokens": total, "model_name": self._last_model_name}
 
     @staticmethod
     def _safe_json(task_output, fallback: dict) -> dict:
@@ -319,4 +332,5 @@ class SolarSentinelCrew:
             "references": [],
             "planner_output_json": "{}",
             "analyzer_output_json": "{}",
+            "usage": {"total_tokens": 0, "model_name": "unknown"},
         }
