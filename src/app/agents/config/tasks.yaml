@@ -121,14 +121,26 @@ qa_review_task:
     - YOLO confidence: {confidence}
     - Timestamp: {timestamp}
 
+    ## Available Tools (use sparingly to spot-check planner claims)
+    - current_time(latitude, longitude, tz_name): re-check daylight and
+      seconds until sunset if the planner's timing window looks off.
+    - weather_forecast(latitude, longitude, hours): re-check the planner's
+      forecast claim if a stated value (temperature, precipitation, wind)
+      seems inconsistent.
+    - web_search(query, max_results): verify any URL or industry norm
+      cited by the planner if you have specific doubt.
+    Only call a tool when there is a concrete inconsistency to verify;
+    do NOT add new research. The planner has primary research duty.
+
     ## Review Checklist
     1. Does the report's defect sub-type and severity match the analyst's JSON?
     2. Are recommended actions exactly the planner's list (or a faithful
        condensation)? No new actions invented.
     3. Is the timing window consistent with the planner's weather and
-       daylight findings?
+       daylight findings? If a number looks wrong, verify with one tool call.
     4. Are any safety constraints from the planner reflected?
     5. Are all citations/URLs preserved (or omitted if planner had none)?
+       Spot-check at most one URL with web_search if it looks fabricated.
     6. Is the language clear and free of jargon?
     7. Is the report under 400 words?
 

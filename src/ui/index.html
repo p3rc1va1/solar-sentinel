@@ -239,11 +239,38 @@
                             <input type="checkbox" id="overlayToggle">
                             <span>YOLO Overlay</span>
                         </label>
+                        <label class="toggle-inline">
+                            <input type="checkbox" id="roiMaskEnabled">
+                            <span>ROI Mask</span>
+                        </label>
+                        <button type="button" id="roiEditBtn" class="btn-secondary">Edit ROI</button>
+                        <button type="button" id="roiResetBtn" class="btn-secondary roi-hidden">Reset</button>
                     </div>
                 </header>
                 <div class="card feed-card">
-                    <img id="liveFeed" src="" alt="Camera feed" class="live-feed-img">
-                    <p class="feed-note">MJPEG stream from Pi Camera Module 3 Wide</p>
+                    <div class="live-feed-stage" id="liveFeedStage">
+                        <img id="liveFeed" src="" alt="Camera feed" class="live-feed-img">
+                        <svg id="roiOverlay" class="roi-overlay" preserveAspectRatio="none" aria-hidden="true">
+                            <defs>
+                                <mask id="roiMask">
+                                    <!-- White = visible (dimmed), black = punched through. -->
+                                    <rect x="0" y="0" width="100%" height="100%" fill="white"></rect>
+                                    <polygon id="roiMaskPunch" points="" fill="black"></polygon>
+                                </mask>
+                            </defs>
+                            <rect id="roiDim" x="0" y="0" width="100%" height="100%"
+                                  fill="rgba(0,0,0,0.65)" mask="url(#roiMask)"></rect>
+                            <polygon id="roiOutline" points="" fill="none"
+                                     stroke="#38bdf8" stroke-width="2"
+                                     vector-effect="non-scaling-stroke"></polygon>
+                            <g id="roiHandles"></g>
+                        </svg>
+                    </div>
+                    <p class="feed-note">
+                        MJPEG stream from Pi Camera Module 3 Wide.
+                        Toggle <em>ROI Mask</em> to dim everything outside the panel area you've defined;
+                        click <em>Edit ROI</em> to drag the four corners.
+                    </p>
                 </div>
             </section>
 

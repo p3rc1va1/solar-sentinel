@@ -156,6 +156,41 @@ class TestAgentBuilding:
         agents = crew._build_agents(planner_tools=[fake_tool])
         assert fake_tool in agents["maintenance_planner_agent"].tools
 
+    def test_qa_reviewer_receives_tools_when_provided(self):
+        """Per the thesis (p.45), the Critic / QA Reviewer also has MCP tools."""
+        from crewai.tools import BaseTool
+
+        class FakeTool(BaseTool):
+            name: str = "fake_tool"
+            description: str = "fake"
+
+            def _run(self, *args, **kwargs):
+                return "ok"
+
+        client = GeminiClient(api_key="")
+        crew = SolarSentinelCrew(client)
+        fake_tool = FakeTool()
+        agents = crew._build_agents(planner_tools=[fake_tool])
+        assert fake_tool in agents["qa_reviewer_agent"].tools
+
+    def test_only_planner_and_qa_have_tools(self):
+        """Analyzer and Report Writer must remain tool-less."""
+        from crewai.tools import BaseTool
+
+        class FakeTool(BaseTool):
+            name: str = "fake_tool"
+            description: str = "fake"
+
+            def _run(self, *args, **kwargs):
+                return "ok"
+
+        client = GeminiClient(api_key="")
+        crew = SolarSentinelCrew(client)
+        agents = crew._build_agents(planner_tools=[FakeTool()])
+        # Analyzer and writer should have no tools (empty list or None).
+        assert not getattr(agents["analyzer_agent"], "tools", None)
+        assert not getattr(agents["report_writer_agent"], "tools", None)
+
 
 class TestYamlLoading:
     def test_load_yaml_caching(self):

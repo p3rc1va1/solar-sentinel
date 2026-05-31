@@ -1,12 +1,14 @@
 """CrewAI crew orchestration.
 
 Pipeline: Analyst (VLM) -> Maintenance Planner (MCP tools) ->
-          Report Writer -> QA Reviewer
+          Report Writer -> QA Reviewer (MCP tools)
 
 Loads agent and task definitions from YAML configs, builds the
 CrewAI crew, and runs the analysis pipeline. The Maintenance Planner
-is given the FastMCP server in src/app/agents/mcp/server.py over stdio
-via crewai-tools' MCPServerAdapter.
+and QA Reviewer are given the FastMCP server in
+src/app/agents/mcp/server.py over stdio via crewai-tools'
+MCPServerAdapter (matching the thesis: only those two agents have
+external tool access).
 """
 
 from __future__ import annotations
@@ -68,6 +70,12 @@ class SolarSentinelCrew:
         "qa_reviewer_agent",
     )
 
+    # Per the thesis (p.45): only the Maintenance Planner and the
+    # Critic / QA Reviewer have access to external MCP tools.
+    TOOL_USING_AGENTS = frozenset(
+        {"maintenance_planner_agent", "qa_reviewer_agent"}
+    )
+
     def __init__(self, gemini_client: GeminiClient) -> None:
         self.gemini_client = gemini_client
         self._last_model_name: str = "unknown"
@@ -95,8 +103,9 @@ class SolarSentinelCrew:
         """Build CrewAI agents from YAML config.
 
         The analyzer is multimodal (uses AddImageTool to attach the panel image).
-        The planner is given any MCP tools that loaded successfully; if none,
-        it runs without tools.
+        The Maintenance Planner and the QA Reviewer share the same MCP tools
+        (web_search, current_time, weather_forecast); other agents run
+        tool-less. If no tools loaded successfully, both run without tools.
         """
         llm = self._get_llm()
         agents: dict[str, Agent] = {}
@@ -112,7 +121,7 @@ class SolarSentinelCrew:
             }
             if key == "analyzer_agent":
                 kwargs["multimodal"] = True
-            if key == "maintenance_planner_agent" and planner_tools:
+            if key in self.TOOL_USING_AGENTS and planner_tools:
                 kwargs["tools"] = list(planner_tools)
             agents[key] = Agent(**kwargs)
 
@@ -167,11 +176,13 @@ class SolarSentinelCrew:
             with adapter_cm as planner_tools:
                 if _HAS_MCP and planner_tools is not None:
                     logger.info(
-                        "Planner MCP tools loaded: %s",
+                        "MCP tools loaded for planner+QA: %s",
                         [t.name for t in planner_tools],
                     )
                 else:
-                    logger.warning("Planner running tool-less (MCP unavailable)")
+                    logger.warning(
+                        "Planner+QA running tool-less (MCP unavailable)"
+                    )
 
                 agents = self._build_agents(planner_tools=planner_tools)
 

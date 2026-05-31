@@ -495,6 +495,9 @@ function startLiveFeed() {
     const img = document.getElementById('liveFeed');
     const overlay = document.getElementById('overlayToggle').checked;
     img.src = `${API}/camera/feed${overlay ? '?overlay=true' : ''}`;
+    // Re-sync the ROI overlay once the new stream's first frame loads,
+    // so the SVG viewBox tracks the rendered <img> size.
+    if (typeof Roi !== 'undefined') Roi.sync();
 }
 
 document.getElementById('overlayToggle').addEventListener('change', () => {
@@ -502,6 +505,198 @@ document.getElementById('overlayToggle').addEventListener('change', () => {
         startLiveFeed();
     }
 });
+
+// ── ROI Mask (UI-only) ────────────────────────────────────────
+//
+// Per thesis §4.3, the user defines the four corners of the solar
+// array. Here we let them draw that quadrilateral over the live
+// MJPEG feed; the polygon is persisted in localStorage as fractional
+// coordinates (0..1) so it survives image-resize and reloads.
+//
+// Backend frames are NOT modified — this is a viewer-side overlay.
+// Server-side pre-inference masking remains in the README's "Not
+// Yet Implemented" list.
+
+const Roi = (() => {
+    const STORAGE_KEY = 'solar-sentinel.roi';
+    const HANDLE_RADIUS = 8;
+    const DEFAULT_INSET = 0.10;
+    const DEFAULT_CORNERS = [
+        [DEFAULT_INSET, DEFAULT_INSET],
+        [1 - DEFAULT_INSET, DEFAULT_INSET],
+        [1 - DEFAULT_INSET, 1 - DEFAULT_INSET],
+        [DEFAULT_INSET, 1 - DEFAULT_INSET],
+    ];
+
+    let state = {
+        corners: cloneCorners(DEFAULT_CORNERS),
+        enabled: false,
+        editing: false,
+    };
+
+    // SVG node refs (resolved on init)
+    let stage, svg, outline, punch, handlesGroup, img;
+    let dragging = null;  // { idx, pointerId } when a handle is being dragged
+
+    function cloneCorners(corners) {
+        return corners.map(([x, y]) => [x, y]);
+    }
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed.corners) && parsed.corners.length === 4) {
+                const ok = parsed.corners.every(
+                    p => Array.isArray(p) && p.length === 2
+                         && Number.isFinite(p[0]) && Number.isFinite(p[1])
+                );
+                if (ok) state.corners = parsed.corners.map(([x, y]) => [
+                    clamp01(x), clamp01(y),
+                ]);
+            }
+            if (typeof parsed.enabled === 'boolean') state.enabled = parsed.enabled;
+        } catch (err) {
+            console.warn('Failed to load ROI from localStorage:', err);
+        }
+    }
+
+    function save() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                corners: state.corners,
+                enabled: state.enabled,
+            }));
+        } catch (err) {
+            console.warn('Failed to save ROI:', err);
+        }
+    }
+
+    function clamp01(v) {
+        return Math.max(0, Math.min(1, v));
+    }
+
+    function init() {
+        stage = document.getElementById('liveFeedStage');
+        svg = document.getElementById('roiOverlay');
+        outline = document.getElementById('roiOutline');
+        punch = document.getElementById('roiMaskPunch');
+        handlesGroup = document.getElementById('roiHandles');
+        img = document.getElementById('liveFeed');
+        if (!stage || !svg || !outline || !punch || !handlesGroup || !img) return;
+
+        load();
+
+        // Toggle handlers.
+        const enableBox = document.getElementById('roiMaskEnabled');
+        const editBtn = document.getElementById('roiEditBtn');
+        const resetBtn = document.getElementById('roiResetBtn');
+        enableBox.checked = state.enabled;
+        enableBox.addEventListener('change', () => {
+            state.enabled = enableBox.checked;
+            save();
+            applyClasses();
+        });
+        editBtn.addEventListener('click', () => {
+            state.editing = !state.editing;
+            editBtn.textContent = state.editing ? 'Done' : 'Edit ROI';
+            resetBtn.classList.toggle('roi-hidden', !state.editing);
+            applyClasses();
+            sync();
+        });
+        resetBtn.addEventListener('click', () => {
+            state.corners = cloneCorners(DEFAULT_CORNERS);
+            save();
+            sync();
+        });
+
+        // Re-sync overlay geometry whenever the rendered image changes size.
+        img.addEventListener('load', sync);
+        window.addEventListener('resize', sync);
+
+        applyClasses();
+        sync();
+    }
+
+    function applyClasses() {
+        if (!stage) return;
+        stage.classList.toggle('roi-visible', state.enabled);
+        stage.classList.toggle('roi-editing', state.editing);
+    }
+
+    /** Rebuild the SVG viewBox + polygon points from current frame size. */
+    function sync() {
+        if (!stage || !svg || !img) return;
+        const rect = img.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        // Use pixel-space coordinates inside the SVG so we can position
+        // <circle> handles directly. preserveAspectRatio="none" + matching
+        // viewBox keeps the polygon aligned with the underlying <img>.
+        svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+        svg.setAttribute('width', rect.width);
+        svg.setAttribute('height', rect.height);
+
+        const pixelPoints = state.corners.map(([fx, fy]) => [
+            fx * rect.width,
+            fy * rect.height,
+        ]);
+        const ptsStr = pixelPoints.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+        outline.setAttribute('points', ptsStr);
+        punch.setAttribute('points', ptsStr);
+
+        // Redraw handles.
+        handlesGroup.innerHTML = '';
+        pixelPoints.forEach(([x, y], idx) => {
+            const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            c.setAttribute('cx', x);
+            c.setAttribute('cy', y);
+            c.setAttribute('r', HANDLE_RADIUS);
+            c.setAttribute('class', 'roi-handle');
+            c.dataset.index = String(idx);
+            c.addEventListener('pointerdown', onPointerDown);
+            handlesGroup.appendChild(c);
+        });
+    }
+
+    function onPointerDown(ev) {
+        if (!state.editing) return;
+        ev.preventDefault();
+        const idx = Number(ev.currentTarget.dataset.index);
+        dragging = { idx, pointerId: ev.pointerId };
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+        ev.currentTarget.addEventListener('pointermove', onPointerMove);
+        ev.currentTarget.addEventListener('pointerup', onPointerUp);
+        ev.currentTarget.addEventListener('pointercancel', onPointerUp);
+    }
+
+    function onPointerMove(ev) {
+        if (!dragging || ev.pointerId !== dragging.pointerId) return;
+        const rect = img.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        const fx = clamp01((ev.clientX - rect.left) / rect.width);
+        const fy = clamp01((ev.clientY - rect.top) / rect.height);
+        state.corners[dragging.idx] = [fx, fy];
+        sync();
+    }
+
+    function onPointerUp(ev) {
+        if (!dragging || ev.pointerId !== dragging.pointerId) return;
+        const target = ev.currentTarget;
+        target.removeEventListener('pointermove', onPointerMove);
+        target.removeEventListener('pointerup', onPointerUp);
+        target.removeEventListener('pointercancel', onPointerUp);
+        try { target.releasePointerCapture(ev.pointerId); } catch (_) { /* ok */ }
+        dragging = null;
+        save();
+    }
+
+    return { init, sync };
+})();
+
+// Initialize once the DOM is ready (this script is loaded at the
+// bottom of <body>, so elements are guaranteed to exist).
+Roi.init();
 
 // ── Settings ──────────────────────────────────────────────────
 

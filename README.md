@@ -28,15 +28,16 @@ Solar Sentinel is an end-to-end autonomous maintenance system for solar panels. 
 
 ### Key Features
 
-- **Binary Detection** — `defect` (damage or blockage) · `healthy` — class granularity resolved by the agentic layer
-- **Agentic Analysis** — Multi-agent pipeline (Analyst → Report Writer → QA Reviewer)
-- **MCP Tool Integration** — Agents access weather, time, and web search tools *(not yet implemented)*
-- **Environmental Context** — Temperature/humidity sensor (DHT22) + Open-Meteo weather API enrich reports
-- **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached images
-- **Adaptive Scheduling** — Capture frequency adapts to detection results
-- **Daylight-Aware** — Only captures during daylight hours (06:00–20:00, hardcoded)
+- **Binary Detection** — `defect` · `healthy` — sub-typing (cracks, soiling, debris, snow, hot spot…) is delegated to the agentic VLM layer
+- **Agentic Analysis** — 4-agent CrewAI pipeline: Defect Analyst (multimodal) → Maintenance Planner → Critic / QA Reviewer → Report Writer
+- **MCP Tool Integration** — FastMCP server over stdio; the Maintenance Planner and the Critic / QA Reviewer share `web_search`, `current_time`, and `weather_forecast` tools
+- **Environmental Context** — Temperature/humidity sensor (DHT22) + Open-Meteo weather API enrich reports, and DHT22 thresholds (>35 °C, <0 °C, >85 % RH) trigger captures via the sensor watcher
+- **Multi-Channel Alerts** — Email (SMTP) and Telegram notifications with attached images, gated on QA approval
+- **Adaptive Scheduling** — Capture frequency adapts to detection results (5 / 15 / 30 min bands)
+- **Daylight-Aware** — Real per-site sunrise/sunset using a NOAA solar position formula (no external API)
 - **Smart Triage** — Rule-based filtering (deduplication, transient rejection, exposure check) before any LLM call
-- **Web Dashboard** — FastAPI backend with REST API and static UI
+- **Daily MEDIUM Digest** — Sub-threshold detections summarised once per day and delivered via email/Telegram
+- **Web Dashboard** — FastAPI backend with REST API and static UI (Dashboard, Detections, Reports, Live Feed with ROI mask overlay, Settings)
 
 ---
 
@@ -64,7 +65,7 @@ The system can be triggered in three ways:
 |:--------|:------------|
 | **Periodic** | Adaptive scheduler captures frames every *N* minutes (default: 15 min, adjusts based on results) |
 | **Manual** | User triggers a capture via the web UI or REST API |
-| **Sensor** | DHT22 thresholds: temp >35°C (PV efficiency drop), temp <0°C (icing risk), humidity >85% (particulate cementation) *(not yet implemented — sensor is read for context only)* |
+| **Sensor** | DHT22 thresholds wired through `core/sensor_watcher.py`: temp >35 °C (PV efficiency drop), temp <0 °C (icing risk), humidity >85 % (particulate cementation). Per-channel cooldown prevents flapping. |
 
 ### Step 2 - Image Capture
 
@@ -72,14 +73,14 @@ The **Camera Module 3 Wide** captures a still frame at 640×640 resolution. Befo
 
 ### Step 3 - YOLO26 Nano Inference
 
-The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN format for ARM optimization). Per the thesis design, the model acts as a **binary smart trigger** — classifying frames as `defect` or `healthy` — because defect sub-type analysis (damage vs. blockage) is delegated to the agentic pipeline's VLM capabilities, which provides better semantic understanding. The model outputs bounding boxes with confidence scores:
+The captured frame is passed to the **YOLO26 Nano** model (exported to NCNN format for ARM optimization). The model acts as a **binary smart trigger** — classifying frames as `defect` or `healthy` — because defect sub-type analysis is delegated to the agentic pipeline's VLM, which provides better semantic understanding. The model outputs bounding boxes with confidence scores:
 
 | Class | What It Detects | Action |
 |:------|:----------------|:-------|
 | `defect` | Any anomaly: cracks, burns, soiling, debris, snow | Routes to confidence-based pipeline |
 | `healthy` | Clean panel surface — no anomalies | No action, logs clean frame |
 
-> **Note:** The current code still trains with `damage` / `blockage` / `healthy` classes. The thesis describes the intended final design as binary (`defect` / `healthy`). Recent commits reflect this migration in progress.
+> **Note:** The training pipeline (`src/notebooks/train_yolo26n.ipynb`, `src/notebooks/train_local.py`) trains the model with `nc=1, names=['defect']`. The `SUBTYPE_REMAP` in the local trainer collapses every source label (damage, blockage, soiling…) onto the single `defect` class.
 
 ### Step 4 - Confidence-Based Routing
 
@@ -91,7 +92,10 @@ Detection Confidence
         ├── ≥ 70%  ──→  HIGH: Trigger CrewAI pipeline immediately
         │                 ↳ Increase capture frequency to every 5 min
         │
-        ├── 45-70% ──→  MEDIUM: Log to database (hourly digest not yet implemented)
+        ├── 45-70% ──→  MEDIUM: Log to database; rolled into a daily
+        │                 digest (`core/digest.py`) summarised by Gemini
+        │                 and dispatched once per day at the configured
+        │                 local time.
         │
         └── < 45%  ──→  LOW: Log to database only, no action
                          ↳ If 6+ consecutive clean frames, reduce
@@ -116,38 +120,35 @@ When a detection passes triage, the system enriches it with context:
 
 ### Step 7 - CrewAI Agentic Pipeline
 
-The enriched detection triggers a **sequential multi-agent pipeline** powered by Google Gemini:
+The enriched detection triggers a **sequential 4-agent pipeline** powered by Google Gemini:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                    CrewAI Pipeline                                │
-│                                                                  │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐         │
-│  │   Defect      │   │ Maintenance  │   │    Critic    │  ┌────┐ │
-│  │   Analyst     │──→│   Planner    │──→│    Agent     │─→│Rpt.│ │
-│  │  (VLM input) │   │  (MCP tools) │   │ (QA + web)  │  └────┘ │
-│  └──────────────┘   └──────────────┘   └──────────────┘         │
-│  ← ─ ─ ─ ─ thesis design (4 agents) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ → │
-│                                                                  │
-│  Current code: Analyst → Report Writer → QA Reviewer (3 agents) │
-│                                                                  │
-│  MCP Server (not yet implemented)                                │
-│  ├── Web Search / Fetch Tool                                    │
-│  ├── Time Tool                                                  │
-│  └── Weather Forecast Tool                                      │
+│                       CrewAI Pipeline                             │
+│                                                                   │
+│  ┌────────────┐   ┌────────────┐   ┌────────────┐   ┌─────────┐ │
+│  │   Defect   │   │ Maintenance│   │   Critic   │   │ Report  │ │
+│  │   Analyst  │──→│   Planner  │──→│   Agent    │──→│ Writer  │ │
+│  │ (VLM image)│   │  (MCP ✔)   │   │  (MCP ✔)   │   │         │ │
+│  └────────────┘   └────────────┘   └────────────┘   └─────────┘ │
+│                                                                   │
+│  FastMCP server (`src/app/agents/mcp/server.py`, stdio):         │
+│  ├── web_search(query, max_results)                              │
+│  ├── current_time(latitude, longitude, tz_name)                  │
+│  └── weather_forecast(latitude, longitude, hours)                │
+│                                                                   │
+│  Per the thesis spec, only the Maintenance Planner and the       │
+│  Critic / QA Reviewer have MCP tool access. Notification is      │
+│  gated on `qa_approved` from the Critic.                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Thesis design (4 agents):**
-
 | Agent | Role | What It Does |
 |:------|:-----|:-------------|
-| **Defect Analyst** | PV systems engineer | Uses VLM to inspect the image, confirms detection isn't a false positive (shadow, animal), classifies severity |
-| **Maintenance Planner** | Field operations | Cross-references findings with weather forecast, time/daylight data, and web search to recommend context-aware actions |
-| **Critic Agent** | Quality assurance | Fact-checks recommendations against web sources and fixed logic rules (e.g., "don't recommend replacement unless loss >20%") |
-| **Report Writer** | Technical writer | Compiles all agent outputs into a user-friendly email/Telegram report |
-
-**Current code (3 agents — `agents/crew.py`):** Analyst → Report Writer → QA Reviewer. The Maintenance Planner is not yet implemented; MCP tools are not wired.
+| **Defect Analyst** | PV systems engineer | Multimodal — uses CrewAI `AddImageTool` to inspect the image, confirms the YOLO trigger isn't a false positive, classifies sub-type and severity |
+| **Maintenance Planner** | Field operations | Cross-references findings with the weather forecast, daylight window, and (if needed) web search to recommend context-aware actions |
+| **Critic Agent** | Quality assurance | Spot-checks planner claims with the same MCP tools when a number or URL looks inconsistent; scores the report and gates dispatch |
+| **Report Writer** | Technical writer | Compiles the analyst and planner outputs into a user-friendly email/Telegram report |
 
 ### Step 8 - Notification Delivery
 
@@ -238,12 +239,18 @@ solar-sentinel/
 │   │   │   ├── detector.py          # YOLO26n inference wrapper
 │   │   │   ├── triage.py            # Rule-based filter (quality, dedup, confirmation)
 │   │   │   ├── scheduler.py         # Daylight-aware adaptive capture scheduler
+│   │   │   ├── solar.py             # NOAA solar position formula → real sunrise/sunset
 │   │   │   ├── sensor.py            # DHT22 temperature/humidity sensor + stub
+│   │   │   ├── sensor_watcher.py    # Polls DHT22 and triggers capture on threshold
+│   │   │   ├── digest.py            # Daily MEDIUM-band digest summariser + dispatch
 │   │   │   └── demo.py              # Demo mode — populates DB with fake data
 │   │   │
 │   │   ├── agents/                  # CrewAI agentic layer
-│   │   │   ├── crew.py              # Crew orchestration (Analyst → Writer → QA)
+│   │   │   ├── crew.py              # 4-agent crew orchestration with MCP fan-out
 │   │   │   ├── model_router.py      # Gemini model discovery + ranking
+│   │   │   ├── mcp/
+│   │   │   │   ├── server.py        # FastMCP server (stdio) launched by the crew
+│   │   │   │   └── tools/           # web_search, current_time, weather_forecast
 │   │   │   └── config/
 │   │   │       ├── agents.yaml      # Agent role / goal / backstory definitions
 │   │   │       └── tasks.yaml       # Task prompts with {placeholder} format strings
@@ -342,11 +349,11 @@ YOLO_MODEL_PATH=data/models/best.pt
 
 ### 3. Train the Model
 
-Open `src/notebooks/train_yolo26n.ipynb` in [Google Colab](https://colab.research.google.com/) and follow the step-by-step cells. The notebook:
+Open `src/notebooks/train_yolo26n.ipynb` in [Google Colab](https://colab.research.google.com/) (or run `src/notebooks/train_local.py` on a Mac/Linux box with MPS/CUDA/CPU autodetect). The pipeline:
 
-1. Downloads 3 solar panel defect datasets from Roboflow
-2. Merges and remaps classes to `damage` / `blockage` / `healthy`
-3. Fine-tunes YOLO26 Nano (50 epochs, ~15 min on T4 GPU)
+1. Downloads 6 solar panel defect datasets from Roboflow (`dataset_3` is held out as an OOD test set)
+2. Merges and remaps every source label onto the binary `defect` class via `SUBTYPE_REMAP`
+3. Fine-tunes YOLO26 Nano (`nc=1, names=['defect']`) and writes a model card to `runs/binary-trigger/`
 4. Exports to NCNN format for Pi 5
 
 Copy the trained model to your Pi:
@@ -385,14 +392,14 @@ The web dashboard is available at `http://<pi-ip>:8000` on the local network. Fo
 
 ## Detection Classes
 
-The thesis design uses **binary detection** — YOLO acts only as a trigger, not a classifier. The agentic pipeline (VLM) determines the defect type. The current code still uses 3 classes (migration in progress per recent commits).
+The model is **binary** — YOLO acts only as a trigger, not a classifier. The agentic pipeline (multimodal Defect Analyst) determines the defect sub-type semantically.
 
-| Class | Thesis Design | Current Code | Triggers Pipeline |
-|:------|:-------------|:-------------|:------------------|
-| **defect** | Intended final | migration in progress | Yes - CrewAI |
-| **damage** | delegated to agents | active in code | Yes - CrewAI |
-| **blockage** | delegated to agents | active in code | Yes - CrewAI |
-| **healthy** | keep | active in code | No |
+| Class | Triggers Pipeline |
+|:------|:------------------|
+| **defect** | Yes — routed through confidence bands (HIGH → CrewAI immediately; MEDIUM → daily digest; LOW → log only) |
+| **healthy** | No — clean frames are logged but never escalated |
+
+> **Sub-typing happens at the agentic layer.** The Defect Analyst picks one of `physical_damage`, `soiling`, `snow_or_ice`, `debris`, `hot_spot`, `discoloration`, `other` and writes it to `reports.defect_subtype`.
 
 ---
 
@@ -402,36 +409,40 @@ The thesis design uses **binary detection** — YOLO acts only as a trigger, not
 
 | Component | Notes |
 |:----------|:------|
-| YOLO26n training pipeline | Colab notebook — trains, exports to NCNN |
+| Binary YOLO26n training pipeline | Colab notebook + local trainer; `nc=1, names=['defect']`; `SUBTYPE_REMAP` collapses all source labels; 6 Roboflow datasets with `dataset_3` held out as OOD |
 | YOLO26n inference | ultralytics wrapper; stub when model/library absent |
 | Rule-based triage agent | Frame quality check, IoU deduplication, 2-hit confirmation |
-| Adaptive capture scheduler | Daylight-aware (hardcoded 06:00–20:00), interval adapts on HIGH/clean |
-| CrewAI 3-agent pipeline | Analyst → Report Writer → QA Reviewer (sequential, Google Gemini) |
-| Gemini model auto-discovery | Dynamic API query + fallback ranked list |
-| Weather context | Open-Meteo API, WMO code lookup, injected into CrewAI context |
-| DHT22 sensor | `adafruit_dht` + stub; temperature/humidity injected into CrewAI context |
+| Adaptive capture scheduler | Real per-site sunrise/sunset (NOAA formula in `core/solar.py`); polar-day/night sentinels; 5 / 15 / 30 min adaptive bands |
+| Sensor-triggered capture | `core/sensor_watcher.py` polls DHT22 every 60 s; thresholds >35 °C / <0 °C / >85 % RH each have an independent cooldown |
+| 4-agent CrewAI pipeline | Defect Analyst (multimodal) → Maintenance Planner → Critic / QA Reviewer → Report Writer; sequential, Google Gemini |
+| FastMCP tool server | `app/agents/mcp/server.py` runs over stdio; exposes `web_search`, `current_time`, `weather_forecast`. Per the thesis, only the Maintenance Planner and the Critic / QA Reviewer have tool access |
+| Multimodal analyzer | Defect Analyst is `multimodal=True` and uses the CrewAI `AddImageTool` to attach the panel image |
+| MEDIUM detection digest | `core/digest.py` summarises sub-threshold detections once per day at the configured local time and dispatches via email + Telegram |
+| QA-gated dispatch | The HIGH-detection callback only sends notifications when `qa_approved` is true |
+| Real token counting | Pulled from `crew.usage_metrics.total_tokens` and `google.genai usage_metadata`, written to `gemini_usage` |
+| Idempotent additive migrations | `database.py:_migrate` adds `defect_subtype`, `analyzer_output_json`, `planner_output_json` to older installs |
+| Gemini model auto-discovery | Dynamic API query + fallback ranked list (`pro=5, flash=3, flash-lite=1`) |
+| Weather context | Open-Meteo current + forecast, WMO code lookup, injected into CrewAI context |
+| Geocoding city picker | Open-Meteo geocoding behind `/geocode`, with debounced UI search in Settings |
+| DHT22 sensor | `adafruit_dht` + stub; live reading exposed at `/sensor` |
 | Email notifications | HTML report + image attachment via SMTP/aiosmtplib |
 | Telegram notifications | Markdown report + photo via `python-telegram-bot` |
-| FastAPI REST API | All routes: health, camera, detections, reports, images, sensor, settings |
+| FastAPI REST API | All routes: health, camera, detections, reports, images, sensor, geocode, settings |
 | MJPEG live stream | `/camera/feed` — optional YOLO bounding box overlay |
-| Web dashboard UI | 5 pages: Dashboard, Detections, Reports, Live Feed, Settings |
+| Web dashboard UI | 5 pages: Dashboard, Detections, Reports, Live Feed (with **interactive ROI mask overlay**), Settings |
 | Demo mode | Separate DB (`solar_sentinel_demo.db`), seeded with fake detections + reports |
-| Runtime settings | Persisted to SQLite, applied live to notification service |
+| Runtime settings | Persisted to SQLite, mirrored to live `Settings` singleton, applied to notification + scheduler + sensor watcher + digest |
 | 3D-printed enclosure | KCL parametric model + STEP export |
 
 ### Not Yet Implemented
 
 | Feature | Thesis Reference | Notes |
 |:--------|:----------------|:------|
-| MCP server + 4 tools | §2.2, §3.3 | Agents have no tool access beyond context strings; web search, time, and weather tools unbuilt |
-| Maintenance Planner agent | §1.4.3, §3.3 | 4th agent described in thesis; code has 3 agents (Analyst → Writer → QA) |
-| VLM image input to agents | §1.4.3, §3.6 | Thesis describes Defect Analyst using VLM on the image; code passes only text (class name, confidence, bbox) |
-| Sensor-triggered capture | §3.3 | DHT22 thresholds (>35°C, <0°C, >85% RH) not wired to scheduler; sensor reads context only |
-| ROI privacy masking | §4.3 | User-defined panel boundary mask to black out non-panel pixels before inference; not implemented |
-| MEDIUM detection digest | §3.11 | UI shows "daily digest" slider; backend logs MEDIUM detections only, no batch delivery |
-| Real daylight calculation | §3.3 | Sunrise/sunset hardcoded 06:00–20:00; no location-based solar calculation |
-| Binary detection model | §2.2 | Thesis describes final model as binary (defect/healthy); code still trains 3-class |
-| Token counting | — | `tokens_used` logged as `0` — CrewAI does not expose token counts |
+| Server-side ROI privacy masking before inference | §4.3, p.51 | The live UI now lets the user draw the 4 panel corners and visually masks the feed (persisted in `localStorage`). The thesis-grade pipeline mask — applying the same polygon to frames *before* they reach the YOLO detector — is still pending. |
+| Quantized / NCNN inference path on the Pi | §2.2, pp.25–26, 31 | Training notebook exports NCNN, but `core/detector.py` loads the unquantized `best.pt` via plain Ultralytics. |
+| §1.3 acceptance criteria — automated verification | §1.3, p.3 | No timing harness for the ≤60 s end-to-end dispatch target, the ≥1 mm-feature-at-1 m optical resolution, or the mAP ≥85 % gate. The local trainer writes a model card but no test asserts the threshold. |
+| Custom anodized-aluminum mount bracket | Drawing Sheet 6/7 | Sheet 6 specifies the bracket (Ra 12.5, ISO 22768-mK, fillets and hole pattern); no part exists in `casing/`. |
+| Tool-access exclusion for Defect Analyst & Report Writer | §3.3 | Currently enforced in code: `crew.py` only fans `tools=mcp_tools` into `TOOL_USING_AGENTS = {planner, qa}`. If the design ever extends, see `tests/test_crew.py::test_only_planner_and_qa_have_tools`. |
 
 ---
 
