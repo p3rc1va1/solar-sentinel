@@ -625,6 +625,19 @@ print(f"\\ndata.yaml written: {yaml_path}")
 TRAIN_CELLS.append(md("""\
 ## Cell 8 — Train YOLO26n with Sprint-2 recipe
 
+**Disconnect resilience.** Free-tier Colab will kill your runtime after ~90 min
+of tab idle, and there's no way to fully prevent that. Instead, we:
+
+1. Save the run **directly to Drive** (not /content/runs) so checkpoints
+   survive a runtime kill.
+2. Set `save_period=1` so Ultralytics writes `last.pt` after every epoch.
+3. Auto-resume from `last.pt` if it exists — re-running this cell after a
+   disconnect picks up where it left off, no manual intervention.
+4. Run a randomised JS keep-alive in DevTools (see the cell after this one).
+
+If Colab dies mid-run, just re-execute this cell. Ultralytics reads the epoch
+counter / optimizer state out of `last.pt` and continues from epoch N+1.
+
 This recipe targets a higher mAP ceiling on the (now homogenised) dataset by
 following Ultralytics' fine-tuning guide rather than aggressively over-tuning
 for the binary case. Defaults are kept where Ultralytics' guidance recommends
@@ -633,90 +646,130 @@ degrees=15) were reverted because they hurt mAP on this dataset.
 
 Key choices:
 
-- `epochs=300, patience=50`: Ultralytics' fine-tuning default; 100 was
-  undertrained at <10k iterations.
+- `epochs=150, patience=30`: schedule sized for the larger Sprint-2 dataset
+  (~5k train images after dedup vs. ~1k previously). With more data each epoch
+  sees more variety, so the model converges faster per pass; patience=30 cuts
+  the run short if val mAP plateaus before that.
 - `optimizer="SGD", lr0=0.01, momentum=0.937`: SGD wins by ~+0.01–0.03 mAP at
   convergence on detection vs. AdamW (YOLOv5/8 default behaviour).
 - `cos_lr=True, warmup_epochs=5`: cosine schedule + longer warmup for the
   longer run.
-- `close_mosaic=30`: longer mosaic-off tail (out of 300) lets the model fit
-  clean image statistics on a small dataset.
+- `close_mosaic=15`: mosaic-off for the last 10 % of training (the
+  Ultralytics-recommended ratio at any schedule length).
 - `cls=0.5` (Ultralytics default, was 0.1): even with `nc=1`, the cls head
   needs gradient signal to discriminate positive vs. background. Setting cls
   too low starved the discriminator in the previous run (recall stuck at 0.24).
 - Augmentation softened: `mosaic=0.5, mixup=0, copy_paste=0, degrees=5,
-  flipud=0`. Aggressive aug on ~1k images pushes images further from
+  flipud=0`. Aggressive aug on a small dataset pushes images further from
   deployment distribution.
+- `save_period=1`: write a checkpoint after every epoch (default is final-only).
 - `seed=42, deterministic=True`: cuDNN-deterministic mode for reproducibility.
 
 Model stays YOLO26n (deployment target is Pi 5; nano fits NCNN budget).
 """))
 
 TRAIN_CELLS.append(code("""\
-# Anti-disconnect for long Colab sessions
-from IPython.display import Javascript, display
-display(Javascript('''
-function KeepAlive() {
-  console.log("Keeping session alive: " + new Date().toLocaleTimeString());
-  document.querySelector("colab-toolbar-button#connect")?.click();
-}
-setInterval(KeepAlive, 60000);
-'''))
-
 from ultralytics import YOLO
 
-TRAIN_ARGS = dict(
-    data=str(MERGED_DIR / "solar_sentinel.yaml"),
-    project="/content/runs",
-    name="binary-trigger",
-    exist_ok=True,
-    verbose=True,
+# Run dir lives on Drive directly so checkpoints survive Colab disconnects.
+RUN_DIR = DRIVE_DIR / "binary-trigger-run"
+RUN_DIR.mkdir(parents=True, exist_ok=True)
+LAST_CKPT = RUN_DIR / "weights" / "last.pt"
 
-    # Schedule (Ultralytics fine-tuning guide)
-    epochs=300,
-    patience=50,
-    imgsz=640,
-    batch=16,
-    close_mosaic=30,
+if LAST_CKPT.exists():
+    print(f"Found existing checkpoint at {LAST_CKPT}")
+    print("Resuming training (Ultralytics reads epoch + optimizer state from last.pt)...")
+    model = YOLO(str(LAST_CKPT))
+    results = model.train(resume=True)
+else:
+    print("No existing checkpoint — starting from scratch.")
+    model = YOLO("yolo26n.pt")
 
-    # Optimizer + LR (SGD wins on detection at convergence)
-    optimizer="SGD",
-    lr0=0.01,
-    momentum=0.937,
-    weight_decay=0.0005,
-    cos_lr=True,
-    warmup_epochs=5,
-    warmup_momentum=0.8,
-    warmup_bias_lr=0.1,
+    TRAIN_ARGS = dict(
+        data=str(MERGED_DIR / "solar_sentinel.yaml"),
+        project=str(RUN_DIR.parent),    # parent of the run dir on Drive
+        name=RUN_DIR.name,              # 'binary-trigger-run'
+        exist_ok=True,
+        verbose=True,
 
-    # Loss (defaults — previous run's cls=0.1 starved gradient)
-    box=7.5,
-    cls=0.5,
-    dfl=1.5,
+        # Schedule (sized for ~5k-image Sprint-2 dataset)
+        epochs=150,
+        patience=30,
+        imgsz=640,
+        batch=16,
+        close_mosaic=15,
+        save_period=1,                   # write last.pt every epoch (resume granularity)
 
-    # Augmentation (softened for ~1k-image dataset)
-    mosaic=0.5,
-    mixup=0.0,
-    copy_paste=0.0,
-    degrees=5,
-    fliplr=0.5,
-    flipud=0.0,
-    hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
-    shear=0.0,
-    perspective=0.0,
-    translate=0.1,
-    scale=0.5,
+        # Optimizer + LR (SGD wins on detection at convergence)
+        optimizer="SGD",
+        lr0=0.01,
+        momentum=0.937,
+        weight_decay=0.0005,
+        cos_lr=True,
+        warmup_epochs=5,
+        warmup_momentum=0.8,
+        warmup_bias_lr=0.1,
 
-    # Reproducibility
-    seed=SEED,
-    deterministic=True,
-    workers=2,
-)
+        # Loss (defaults — previous run's cls=0.1 starved gradient)
+        box=7.5,
+        cls=0.5,
+        dfl=1.5,
 
-model = YOLO("yolo26n.pt")
-results = model.train(**TRAIN_ARGS)
-RUN_DIR = Path("/content/runs/binary-trigger")
+        # Augmentation (softened for ~5k-image dataset)
+        mosaic=0.5,
+        mixup=0.0,
+        copy_paste=0.0,
+        degrees=5,
+        fliplr=0.5,
+        flipud=0.0,
+        hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
+        shear=0.0,
+        perspective=0.0,
+        translate=0.1,
+        scale=0.5,
+
+        # Reproducibility
+        seed=SEED,
+        deterministic=True,
+        workers=2,
+    )
+
+    results = model.train(**TRAIN_ARGS)
+
 print(f"\\nTraining complete. Run dir: {RUN_DIR}")
+"""))
+
+
+TRAIN_CELLS.append(md("""\
+## Cell 8b — Keep-alive (paste into DevTools console, optional but recommended)
+
+Don't run this cell. Instead:
+
+1. Open Colab DevTools: **right-click → Inspect → Console** tab.
+2. Copy and paste the snippet below.
+3. Press Enter.
+4. Leave the tab open in the background.
+
+The keep-alive emits a randomised click event every 30–90 seconds, varied
+enough to avoid Google's detection of obvious activity-faking. It's
+*supplementary* to the resume-from-checkpoint setup in cell 8 — even if this
+fails, your training survives a disconnect.
+
+```javascript
+function jiggleColab() {
+    const btn = document.querySelector("colab-connect-button")?.shadowRoot?.querySelector("#connect");
+    if (btn) btn.dispatchEvent(new MouseEvent("mousemove", {bubbles: true}));
+    const next = 30000 + Math.random() * 60000;
+    console.log(`[keepalive] tick ${new Date().toLocaleTimeString()}, next in ${(next/1000).toFixed(0)}s`);
+    setTimeout(jiggleColab, next);
+}
+jiggleColab();
+```
+
+To stop it: refresh the page, or run `clearTimeout(...)` if you saved the id.
+
+If Colab disconnects anyway (free tier is unreliable), just re-run cell 8 —
+training resumes from the last saved epoch automatically.
 """))
 
 
@@ -949,15 +1002,15 @@ dedup_summary = (
 )
 
 hparam_rows = [
-    {"arg": "epochs", "value": 300, "default": 100, "rationale": "Ultralytics finetuning guide"},
-    {"arg": "patience", "value": 50, "default": 100, "rationale": "longer schedule"},
+    {"arg": "epochs", "value": 150, "default": 100, "rationale": "sized for ~5k-image Sprint-2 dataset"},
+    {"arg": "patience", "value": 30, "default": 100, "rationale": "early stop if val mAP plateaus"},
     {"arg": "optimizer", "value": "SGD", "default": "auto", "rationale": "wins at convergence on detection"},
     {"arg": "lr0", "value": 0.01, "default": 0.01, "rationale": "SGD baseline"},
-    {"arg": "cos_lr", "value": True, "default": False, "rationale": "smoother decay over 300 epochs"},
-    {"arg": "warmup_epochs", "value": 5, "default": 3, "rationale": "longer warmup for longer run"},
-    {"arg": "close_mosaic", "value": 30, "default": 10, "rationale": "longer mosaic-off tail on small dataset"},
+    {"arg": "cos_lr", "value": True, "default": False, "rationale": "smoother decay"},
+    {"arg": "warmup_epochs", "value": 5, "default": 3, "rationale": "longer warmup"},
+    {"arg": "close_mosaic", "value": 15, "default": 10, "rationale": "10% mosaic-off tail"},
     {"arg": "cls", "value": 0.5, "default": 0.5, "rationale": "default — earlier 0.1 starved discriminator"},
-    {"arg": "mosaic", "value": 0.5, "default": 1.0, "rationale": "softer aug for ~1k-image set"},
+    {"arg": "mosaic", "value": 0.5, "default": 1.0, "rationale": "softer aug for small dataset"},
     {"arg": "mixup", "value": 0.0, "default": 0.0, "rationale": "off — defects don't blend"},
     {"arg": "copy_paste", "value": 0.0, "default": 0.0, "rationale": "off — earlier 0.2 hurt mAP"},
     {"arg": "degrees", "value": 5, "default": 0, "rationale": "mild rotation jitter"},
@@ -996,13 +1049,15 @@ print(rendered[:1200] + "…")
 
 
 TRAIN_CELLS.append(md("""\
-## Cell 13 — Persist run to Google Drive
+## Cell 13 — Snapshot the finished run + publish convenience aliases
 
-Copies the entire `runs/binary-trigger/` folder to a timestamped subdirectory
-of `MyDrive/solar-sentinel-models/`, plus convenience aliases (`best_latest.pt`
-and `best_latest_ncnn_model/`) for the Pi-deployment script.
+`RUN_DIR` is already on Drive (the training cell saves there directly), so
+this cell does **not** need to copy the whole run again. It just snapshots
+the final state to a timestamped subdir for thesis-defence reproducibility,
+and refreshes the `best_latest.*` convenience aliases that the Pi-deployment
+script reads from.
 
-Old runs are never overwritten.
+Old timestamped snapshots are never overwritten.
 """))
 
 TRAIN_CELLS.append(code("""\
@@ -1010,8 +1065,8 @@ import shutil
 from datetime import datetime, timezone
 
 stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-dst_run = DRIVE_DIR / f"binary-trigger-{stamp}"
-shutil.copytree(RUN_DIR, dst_run)
+snapshot = DRIVE_DIR / f"binary-trigger-{stamp}"
+shutil.copytree(RUN_DIR, snapshot)
 
 # Convenience aliases — overwrite each run
 latest_pt = DRIVE_DIR / "best_latest.pt"
@@ -1022,7 +1077,7 @@ if latest_ncnn.exists():
     shutil.rmtree(latest_ncnn)
 shutil.copytree(RUN_DIR / "weights" / "best_ncnn_model", latest_ncnn)
 
-print(f"\\nFull run    : {dst_run}")
+print(f"\\nSnapshot    : {snapshot}")
 print(f"Latest .pt  : {latest_pt}")
 print(f"Latest NCNN : {latest_ncnn}")
 print("\\nNext: open evaluate_model.ipynb locally to compute trigger-aware metrics")

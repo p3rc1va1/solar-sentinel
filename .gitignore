@@ -38,5 +38,6 @@
 
 src/notebooks/datasets
 src/notebooks/runs
+src/datasets
 
 .claude
