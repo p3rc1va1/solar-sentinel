@@ -8,7 +8,7 @@ triage_agent:
     (reject >30% over/underexposed).
 
 analyzer_agent:
-  role: "Solar Panel Defect Analyst"
+  role: "Defect Analyst"
   goal: >
     Examine the captured image with a vision-language model to confirm or
     refine the YOLO trigger. Distinguish real defects (cracks, burns,
@@ -25,7 +25,7 @@ analyzer_agent:
     description of what is in the image.
 
 maintenance_planner_agent:
-  role: "Field Maintenance Planner"
+  role: "Maintenance Planner"
   goal: >
     Translate the Defect Analyst's findings into a concrete, time-aware
     action plan. Use the available tools to check the current local time,
@@ -42,7 +42,7 @@ maintenance_planner_agent:
     ground in the analyst's findings or in tool output.
 
 report_writer_agent:
-  role: "Technical Report Writer"
+  role: "Report Writer"
   goal: >
     Produce a clear, professional, actionable maintenance report that
     fuses the Defect Analyst's observations with the Maintenance
@@ -54,7 +54,7 @@ report_writer_agent:
     into step-by-step instructions that field crews can follow safely.
 
 qa_reviewer_agent:
-  role: "Quality Assurance Reviewer"
+  role: "Critic"
   goal: >
     Validate maintenance reports for accuracy, completeness, and
     actionability. Catch hallucinated information, inconsistencies

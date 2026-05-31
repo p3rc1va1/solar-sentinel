@@ -1093,438 +1093,236 @@ print("       and update the MODEL_CARD.md.")
 EVAL_CELLS: list[dict] = []
 
 EVAL_CELLS.append(md("""\
-# Solar Sentinel — model evaluation (trigger-aware)
+# Solar Sentinel — visual model demo
 
-Run *locally* against a `best.pt` produced by `train_yolo26n.ipynb`. Computes
-the metrics that matter for a *gate to a downstream agent*, not the metrics
-that matter for a standalone classifier:
+Loads the trained `best.pt` and shows what the binary trigger sees on real
+test-split panels. The point of this notebook is to make the model legible —
+boxes drawn on actual panels, predictions sorted by the deployment-threshold
+gates the production pipeline uses (HIGH ≥ 0.70, MEDIUM ≥ 0.45, LOW < 0.45).
 
-- PR-AUC, ROC-AUC
-- Threshold sweep (`threshold_sweep.csv`) → deployment threshold (recall ≥ 0.95)
-- Calibration curve + ECE, with post-hoc temperature scaling
-- Per-sub-type recall on the OOD test split (dominant-subtype overfit check)
-- Albumentations corruption probe (one-line robustness summary)
-- Renders trigger metrics back into `MODEL_CARD.md`
+For the downstream multi-agent analysis, see
+`src/scripts/run_crew_demo.py` — that script picks an example image,
+calls the four-agent CrewAI pipeline, and prints a CrewAI Traces URL.
 """))
 
 
 EVAL_CELLS.append(md("""\
 ## Cell 1 — Configuration
 
-Point this at the run folder you want to evaluate. The default expects the
-notebook is run alongside the run directory or with the merged dataset
-co-located (matches the Colab layout).
+Paths are resolved relative to the notebook directory. `best.pt` lives next
+to this notebook; the dataset lives at `src/datasets/solar-sentinel/`.
+
+We default to the **val** split because it shows what the model has actually
+learned. The **test** split is `dataset_3` held entirely out from training
+(cross-source OOD) — the model performs much worse there by design. Flip
+`SPLIT` below to `"test"` if you want to see the OOD picture instead.
+
+`HIGH_CONF` and `MEDIUM_CONF` mirror `app/config.py` (`Settings.confidence_high`
+/ `confidence_medium`) so the colored bounding boxes in the grid match what
+the production scheduler would route to the crew.
 """))
 
 EVAL_CELLS.append(code("""\
 from pathlib import Path
 
-# Path to the training run folder (contains weights/best.pt, dataset_manifest.json, etc.)
-RUN_DIR = Path("./runs/binary-trigger")
-# Path to the merged dataset (the data.yaml inside is what model.val() reads)
-DATASET_DIR = Path("./datasets/solar-sentinel")
+# Resolve paths off the notebook's own location so it works no matter
+# where Jupyter is launched from.
+NB_DIR = Path.cwd()
+MODEL_PATH = NB_DIR / "best.pt"
+DATASET_DIR = NB_DIR.parent / "datasets" / "solar-sentinel"
 
-assert (RUN_DIR / "weights" / "best.pt").exists(), \\
-    f"Missing best.pt under {RUN_DIR}; download from Drive first."
-assert (DATASET_DIR / "solar_sentinel.yaml").exists(), \\
-    f"Missing dataset config under {DATASET_DIR}."
+SPLIT = "val"  # "val" for in-distribution demo, "test" for OOD (dataset_3)
+IMAGES_DIR = DATASET_DIR / "images" / SPLIT
+LABELS_DIR = DATASET_DIR / "labels" / SPLIT
 
-print("Run dir :", RUN_DIR.resolve())
-print("Data dir:", DATASET_DIR.resolve())
+# Confidence gates — must match Settings.confidence_high/_medium in app/config.py
+HIGH_CONF = 0.70
+MEDIUM_CONF = 0.45
+
+assert MODEL_PATH.exists(), f"best.pt not found at {MODEL_PATH}"
+assert IMAGES_DIR.exists(), f"{SPLIT} images missing at {IMAGES_DIR}"
+
+print(f"Model        : {MODEL_PATH}")
+print(f"Split        : {SPLIT}")
+print(f"Images dir   : {IMAGES_DIR}")
+print(f"HIGH gate    : {HIGH_CONF}")
+print(f"MEDIUM gate  : {MEDIUM_CONF}")
 """))
 
 
 EVAL_CELLS.append(md("""\
-## Cell 2 — Install dependencies (local environment)
+## Cell 2 — Load model + summarise the chosen split
 
-`netcal` for ECE; `albumentations` for the robustness probe.
+Loads YOLO once (cached for the rest of the notebook) and counts how many
+images in the chosen split carry a non-empty label file (i.e. are positives).
 """))
 
 EVAL_CELLS.append(code("""\
-!uv pip install -q "ultralytics>=8.4.0" "scikit-learn>=1.4" "pandas>=2.2" \\
-    "matplotlib>=3.8" "netcal>=1.3" "albumentations>=1.4" "Pillow>=10" "Jinja2>=3.1"
-print("done.")
-"""))
-
-
-EVAL_CELLS.append(md("""\
-## Cell 3 — Per-image positive scores on val and OOD test
-
-For each image, the *image-level positive score* is the maximum box confidence
-predicted at inference time (or 0 if no boxes). This converts the detector
-into a binary classifier we can sweep thresholds against.
-"""))
-
-EVAL_CELLS.append(code("""\
-import json
-
-import numpy as np
-import pandas as pd
 from ultralytics import YOLO
 
-manifest = pd.DataFrame(json.loads((RUN_DIR / "dataset_manifest.json").read_text()))
-print(f"Loaded manifest: {len(manifest)} images")
-print(manifest.groupby("split").size())
+model = YOLO(str(MODEL_PATH))
+print(f"Class names : {model.names}")
+print(f"Image size  : 640 x 640 (training default)")
 
-model = YOLO(str(RUN_DIR / "weights" / "best.pt"))
+# A label file with at least one row marks a positive.
+all_images = sorted(p for p in IMAGES_DIR.iterdir()
+                    if p.suffix.lower() in {".jpg", ".jpeg", ".png"})
+positive_images = []
+for img_path in all_images:
+    lbl = LABELS_DIR / f"{img_path.stem}.txt"
+    if lbl.exists() and lbl.read_text().strip():
+        positive_images.append(img_path)
 
-
-def image_path_for(row: pd.Series) -> Path:
-    safe = f"{row['source_dataset']}_{row['image_filename']}"
-    return DATASET_DIR / "images" / row["split"] / safe
-
-
-def predict_scores(rows: pd.DataFrame, conf: float = 0.001) -> np.ndarray:
-    scores = []
-    for _, r in rows.iterrows():
-        p = image_path_for(r)
-        res = model.predict(source=str(p), imgsz=640, conf=conf, verbose=False)
-        boxes = res[0].boxes
-        scores.append(float(boxes.conf.max()) if boxes is not None and len(boxes) else 0.0)
-    return np.asarray(scores)
-
-
-val_rows = manifest[manifest["split"] == "val"].reset_index(drop=True)
-test_rows = manifest[manifest["split"] == "test"].reset_index(drop=True)
-
-val_rows["score"] = predict_scores(val_rows)
-test_rows["score"] = predict_scores(test_rows)
-
-print("\\nVal positives mean score:",
-      val_rows.loc[val_rows["is_positive"], "score"].mean())
-print("Val negatives mean score:",
-      val_rows.loc[~val_rows["is_positive"], "score"].mean())
+print(f"\\n{SPLIT} images   : {len(all_images)}")
+print(f"With ground truth : {len(positive_images)} positives")
 """))
 
 
 EVAL_CELLS.append(md("""\
-## Cell 4 — PR-AUC, ROC-AUC, threshold sweep
+## Cell 3 — Hero detection
 
-PR-AUC is the headline trigger metric — threshold-free, sensitive to recall on
-small positive populations. Threshold sweep produces the data driving the
-deployment-threshold rule in the next cell.
+Pick the first labeled positive (deterministic — sorted filename) and run
+`model.predict()` on it with a low confidence floor of 0.05 so we see *any*
+boxes the model proposes. The full annotated image (Ultralytics' built-in
+`result.plot()`) is rendered large.
+
+The header tells the story: which gate this image's max-box confidence
+falls into in production.
 """))
 
 EVAL_CELLS.append(code("""\
-from sklearn.metrics import (
-    average_precision_score, roc_auc_score, precision_recall_fscore_support
-)
-
-y_val = val_rows["is_positive"].astype(int).to_numpy()
-s_val = val_rows["score"].to_numpy()
-y_test = test_rows["is_positive"].astype(int).to_numpy()
-s_test = test_rows["score"].to_numpy()
-
-pr_auc_val = average_precision_score(y_val, s_val)
-pr_auc_test = average_precision_score(y_test, s_test)
-roc_auc_val = roc_auc_score(y_val, s_val)
-roc_auc_test = roc_auc_score(y_test, s_test)
-
-print(f"PR-AUC   val={pr_auc_val:.4f}   test={pr_auc_test:.4f}")
-print(f"ROC-AUC  val={roc_auc_val:.4f}   test={roc_auc_test:.4f}")
-
-# Threshold sweep
-thresholds = np.arange(0.05, 0.96, 0.01)
-sweep_rows = []
-for t in thresholds:
-    pred = (s_val >= t).astype(int)
-    p, r, f1, _ = precision_recall_fscore_support(
-        y_val, pred, average="binary", zero_division=0
-    )
-    f2 = (5 * p * r / (4 * p + r)) if (4 * p + r) > 0 else 0.0
-    fp = ((pred == 1) & (y_val == 0)).sum()
-    fpr = fp / max((y_val == 0).sum(), 1)
-    sweep_rows.append({"threshold": t, "precision": p, "recall": r, "f1": f1, "f2": f2, "fpr": fpr})
-
-sweep = pd.DataFrame(sweep_rows)
-sweep_path = RUN_DIR / "threshold_sweep.csv"
-sweep.to_csv(sweep_path, index=False)
-print(f"\\nSweep saved: {sweep_path}")
-
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots(figsize=(9, 5))
-ax.plot(sweep.threshold, sweep.precision, label="precision")
-ax.plot(sweep.threshold, sweep.recall, label="recall")
-ax.plot(sweep.threshold, sweep.f2, label="F2")
-ax.set_xlabel("confidence threshold")
-ax.set_ylabel("score")
-ax.set_title("Threshold sweep on val")
-ax.grid(alpha=0.3)
-ax.legend()
-fig.tight_layout()
-fig.savefig(RUN_DIR / "threshold_sweep.png", dpi=140)
-plt.show()
-"""))
+hero_path = positive_images[0]
+result = model.predict(source=str(hero_path), imgsz=640, conf=0.05, verbose=False)[0]
 
+boxes = result.boxes
+top_conf = float(boxes.conf.max()) if boxes is not None and len(boxes) else 0.0
+n_boxes = len(boxes) if boxes is not None else 0
 
-EVAL_CELLS.append(md("""\
-## Cell 5 — Deployment threshold selection
-
-Rule: lowest `t` such that `recall_val ≥ 0.95`. Fallback: `argmax(F2)`.
-
-This threshold becomes the recommended `Settings.confidence_high` for the
-deployed Pi.
-"""))
-
-EVAL_CELLS.append(code("""\
-target_recall = 0.95
-qualifying = sweep[sweep.recall >= target_recall]
-
-if not qualifying.empty:
-    chosen = qualifying.iloc[qualifying.threshold.argmin()]
-    rule = f"recall_val >= {target_recall}"
+if top_conf >= HIGH_CONF:
+    gate = "HIGH — would trigger CrewAI pipeline"
+elif top_conf >= MEDIUM_CONF:
+    gate = "MEDIUM — would log only"
 else:
-    chosen = sweep.iloc[sweep.f2.idxmax()]
-    rule = "argmax(F2) — fallback"
-    print(f"WARNING: no threshold reached recall ≥ {target_recall}. Falling back to argmax F2.")
+    gate = "LOW — would be discarded"
 
-t_dep = float(chosen.threshold)
+print(f"Hero image : {hero_path.name}")
+print(f"Boxes drawn: {n_boxes}")
+print(f"Top conf   : {top_conf:.3f}  →  {gate}")
 
-
-def metrics_at(t: float, y: np.ndarray, s: np.ndarray) -> dict:
-    pred = (s >= t).astype(int)
-    p, r, f1, _ = precision_recall_fscore_support(y, pred, average="binary", zero_division=0)
-    f2 = (5 * p * r / (4 * p + r)) if (4 * p + r) > 0 else 0.0
-    fpr = ((pred == 1) & (y == 0)).sum() / max((y == 0).sum(), 1)
-    return {"precision": float(p), "recall": float(r), "f1": float(f1), "f2": float(f2), "fpr": float(fpr)}
-
-
-deployment = {
-    "threshold": t_dep,
-    "rule": rule,
-    "metrics_at_threshold": {
-        "val": metrics_at(t_dep, y_val, s_val),
-        "test": metrics_at(t_dep, y_test, s_test),
-    },
-    "pr_auc": {"val": float(pr_auc_val), "test": float(pr_auc_test)},
-    "roc_auc": {"val": float(roc_auc_val), "test": float(roc_auc_test)},
-}
-print(json.dumps(deployment, indent=2))
+# result.plot() returns an annotated BGR ndarray — convert for matplotlib.
+annotated = result.plot()[:, :, ::-1]  # BGR -> RGB
+fig, ax = plt.subplots(figsize=(11, 9), dpi=120)
+ax.imshow(annotated)
+ax.set_title(f"{hero_path.name}  —  top conf {top_conf:.3f}  ({gate.split(' — ')[0]})")
+ax.axis("off")
+fig.tight_layout()
+plt.show()
 """))
 
 
 EVAL_CELLS.append(md("""\
-## Cell 6 — Calibration curve + temperature scaling
+## Cell 4 — 3×3 detection grid (color-coded by deployment gate)
 
-YOLO confidences are typically over-confident post-sigmoid. We measure ECE,
-fit a single temperature scalar on val NLL, and re-measure. Goes into the
-model card and informs whether the chosen threshold should be applied to raw
-or temperature-scaled scores.
+Run inference on the next nine labeled positives and render a 3×3 grid of
+predicted boxes with **colored borders** that mirror the production routing:
+
+- 🟢 green  — HIGH (≥ 0.70): CrewAI pipeline would fire
+- 🟡 amber  — MEDIUM (0.45–0.70): logged in DB only
+- 🔴 red    — LOW (< 0.45) or no detection: discarded
+
+Each subplot's title shows the predicted bounding-box count and max
+confidence. This is the "what does the trigger see?" picture in one glance.
 """))
 
 EVAL_CELLS.append(code("""\
-from netcal.metrics import ECE
-from netcal.scaling import TemperatureScaling
-import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Rectangle
+from PIL import Image
+
+GATE_COLORS = {"HIGH": "#22c55e", "MEDIUM": "#f59e0b", "LOW": "#ef4444"}
 
 
-# ECE on raw scores
-ece_metric = ECE(bins=10)
-ece_before_val = float(ece_metric.measure(s_val, y_val))
-ece_before_test = float(ece_metric.measure(s_test, y_test))
+def gate_for(conf: float) -> str:
+    if conf >= HIGH_CONF:
+        return "HIGH"
+    if conf >= MEDIUM_CONF:
+        return "MEDIUM"
+    return "LOW"
 
 
-# Fit temperature on val
-ts = TemperatureScaling()
-ts.fit(s_val, y_val)
-s_val_cal = ts.transform(s_val)
-s_test_cal = ts.transform(s_test)
+# Skip the hero image so we don't double-count it.
+grid_images = positive_images[1:10]
+assert len(grid_images) == 9, "Need at least 10 positives in test split"
 
+fig, axes = plt.subplots(3, 3, figsize=(13, 13), dpi=120)
+for ax, img_path in zip(axes.flat, grid_images):
+    res = model.predict(source=str(img_path), imgsz=640, conf=0.05, verbose=False)[0]
+    boxes = res.boxes
+    n = len(boxes) if boxes is not None else 0
+    top = float(boxes.conf.max()) if n else 0.0
+    gate = gate_for(top)
+    color = GATE_COLORS[gate]
 
-ece_after_val = float(ece_metric.measure(s_val_cal, y_val))
-ece_after_test = float(ece_metric.measure(s_test_cal, y_test))
+    img = Image.open(img_path).convert("RGB")
+    ax.imshow(img)
 
+    # Draw every predicted box at its own color (uniform per image — its gate).
+    if n:
+        xyxy = boxes.xyxy.cpu().numpy()
+        confs = boxes.conf.cpu().numpy()
+        for (x1, y1, x2, y2), c in zip(xyxy, confs):
+            rect = Rectangle(
+                (x1, y1), x2 - x1, y2 - y1,
+                linewidth=2.5, edgecolor=color, facecolor="none",
+            )
+            ax.add_patch(rect)
+            ax.text(
+                x1, max(0, y1 - 6), f"{c:.2f}",
+                color="white", fontsize=9, fontweight="bold",
+                bbox=dict(facecolor=color, edgecolor="none", pad=2),
+            )
 
-print(f"ECE val   raw={ece_before_val:.4f}   scaled={ece_after_val:.4f}")
-print(f"ECE test  raw={ece_before_test:.4f}  scaled={ece_after_test:.4f}")
-print(f"Fitted temperature: {float(ts.weights[0]):.4f}")
+    ax.set_title(f"{gate}  ·  top {top:.2f}  ·  {n} box{'es' if n != 1 else ''}", fontsize=10)
+    ax.axis("off")
 
-
-def reliability(ax, scores, y, bins=10, label=""):
-    edges = np.linspace(0, 1, bins + 1)
-    centres, accs = [], []
-    for lo, hi in zip(edges[:-1], edges[1:]):
-        mask = (scores >= lo) & (scores < hi)
-        if mask.sum() == 0:
-            continue
-        centres.append((lo + hi) / 2)
-        accs.append(y[mask].mean())
-    ax.plot(centres, accs, marker="o", label=label)
-
-
-fig, ax = plt.subplots(figsize=(6, 6))
-ax.plot([0, 1], [0, 1], "k--", alpha=0.4, label="perfect")
-reliability(ax, s_val, y_val, label="val raw")
-reliability(ax, s_val_cal, y_val, label="val scaled")
-ax.set_xlabel("predicted probability")
-ax.set_ylabel("empirical positive rate")
-ax.set_title("Reliability diagram")
-ax.legend()
-ax.grid(alpha=0.3)
+# Legend in the figure
+fig.suptitle("Test-split predictions, colored by deployment gate", fontsize=13)
 fig.tight_layout()
-fig.savefig(RUN_DIR / "calibration_curve.png", dpi=140)
 plt.show()
 
-
-calibration = {
-    "ece_before": {"val": ece_before_val, "test": ece_before_test},
-    "ece_after_temp": {"val": ece_after_val, "test": ece_after_test},
-    "temperature": float(ts.weights[0]),
-}
-deployment["calibration"] = calibration
+# Quick numeric summary so the picture has a one-liner companion.
+gate_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+for img_path in grid_images:
+    res = model.predict(source=str(img_path), imgsz=640, conf=0.05, verbose=False)[0]
+    b = res.boxes
+    top = float(b.conf.max()) if b is not None and len(b) else 0.0
+    gate_counts[gate_for(top)] += 1
+print("\\nGate breakdown for these 9 images:")
+for g, c in gate_counts.items():
+    print(f"  {g:6s} {c}")
 """))
 
 
 EVAL_CELLS.append(md("""\
-## Cell 7 — Per-sub-type recall on OOD test
+## Cell 5 — Next: see the agent pipeline run on this image
 
-The dominant-subtype overfit check. Even though training is binary, the
-manifest carries the original sub-type. If recall on, say, `soiling_bird` is
-much lower than on `physical_damage`, the binary head has overfit to the
-dominant sub-type — this goes into the model card as a known limitation.
-"""))
+The trigger half is now visible. The other half — Analyzer → Maintenance
+Planner → Report Writer → QA Reviewer — runs as a separate script so it can
+be invoked end-to-end without spinning up the full FastAPI app.
 
-EVAL_CELLS.append(code("""\
-test_pos = test_rows[test_rows.is_positive].copy()
-test_pos["pred"] = (test_pos.score >= t_dep).astype(int)
+```bash
+cd src/
+uv run python -m scripts.run_crew_demo
+```
 
-per_sub = (
-    test_pos.groupby("primary_subtype")["pred"]
-    .agg(n="size", recall="mean")
-    .reset_index()
-    .sort_values("recall")
-)
-print(per_sub.to_string(index=False))
+The script picks the same first labeled positive used in Cell 3, calls
+`SolarSentinelCrew.analyze_detection(...)`, and prints a CrewAI Traces URL
+(e.g. `https://app.crewai.com/crewai_plus/...`). Open the URL to see all
+four agent spans with timing and prompts.
 
-deployment["per_subtype_recall_test"] = {
-    row.primary_subtype: {"n": int(row.n), "recall": float(row.recall)}
-    for row in per_sub.itertuples()
-}
-"""))
-
-
-EVAL_CELLS.append(md("""\
-## Cell 8 — Robustness probe (Albumentations corruptions)
-
-One-line summary of how recall degrades under brightness/contrast/blur/fog
-perturbations. Severity moderate; mirrors ImageNet-C severity 1–3 conventions.
-"""))
-
-EVAL_CELLS.append(code("""\
-import albumentations as A
-import cv2
-import numpy as np
-
-corruptions = A.Compose([
-    A.OneOf([
-        A.RandomBrightnessContrast(brightness_limit=0.4, contrast_limit=0.4, p=1.0),
-        A.MotionBlur(blur_limit=11, p=1.0),
-        A.RandomFog(p=1.0),
-    ], p=1.0),
-])
-
-
-def predict_corrupted(rows: pd.DataFrame) -> np.ndarray:
-    scores = []
-    rng = np.random.default_rng(SEED if "SEED" in dir() else 42)
-    for _, r in rows.iterrows():
-        path = image_path_for(r)
-        img = cv2.imread(str(path))
-        if img is None:
-            scores.append(0.0)
-            continue
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        # Drive Albumentations RNG deterministically
-        np.random.seed(int(rng.integers(0, 1_000_000)))
-        out = corruptions(image=img)["image"]
-        out_bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
-        res = model.predict(source=out_bgr, imgsz=640, conf=0.001, verbose=False)
-        boxes = res[0].boxes
-        scores.append(float(boxes.conf.max()) if boxes is not None and len(boxes) else 0.0)
-    return np.asarray(scores)
-
-
-s_test_corr = predict_corrupted(test_rows)
-recall_clean = ((s_test >= t_dep) & (y_test == 1)).sum() / max(y_test.sum(), 1)
-recall_corr = ((s_test_corr >= t_dep) & (y_test == 1)).sum() / max(y_test.sum(), 1)
-print(f"Recall (clean OOD)     : {recall_clean:.4f}")
-print(f"Recall (corrupted OOD) : {recall_corr:.4f}")
-print(f"Drop                   : {recall_clean - recall_corr:+.4f}")
-
-deployment["robustness"] = {
-    "recall_clean": float(recall_clean),
-    "recall_corrupted": float(recall_corr),
-}
-"""))
-
-
-EVAL_CELLS.append(md("""\
-## Cell 9 — Persist deployment_threshold.json + update MODEL_CARD.md
-
-Writes the trigger-aware metrics block into the run folder and patches the
-model card so the “Trigger-aware metrics” section is no longer `_pending_`.
-"""))
-
-EVAL_CELLS.append(code("""\
-import re
-
-dep_path = RUN_DIR / "deployment_threshold.json"
-dep_path.write_text(json.dumps(deployment, indent=2))
-print(f"Wrote {dep_path}")
-
-card_path = RUN_DIR / "MODEL_CARD.md"
-card = card_path.read_text()
-
-trigger_block_lines = [
-    "## Trigger-aware metrics",
-    f"- PR-AUC: val {deployment['pr_auc']['val']:.4f}, test {deployment['pr_auc']['test']:.4f}",
-    f"- ROC-AUC: val {deployment['roc_auc']['val']:.4f}, test {deployment['roc_auc']['test']:.4f}",
-    f"- Deployment threshold: **{deployment['threshold']:.3f}** ({deployment['rule']})",
-    "  | Split | precision | recall | F2 | FPR |",
-    "  |---|---|---|---|---|",
-    f"  | val  | {deployment['metrics_at_threshold']['val']['precision']:.4f} | "
-    f"{deployment['metrics_at_threshold']['val']['recall']:.4f} | "
-    f"{deployment['metrics_at_threshold']['val']['f2']:.4f} | "
-    f"{deployment['metrics_at_threshold']['val']['fpr']:.4f} |",
-    f"  | test | {deployment['metrics_at_threshold']['test']['precision']:.4f} | "
-    f"{deployment['metrics_at_threshold']['test']['recall']:.4f} | "
-    f"{deployment['metrics_at_threshold']['test']['f2']:.4f} | "
-    f"{deployment['metrics_at_threshold']['test']['fpr']:.4f} |",
-    f"- ECE val: raw {deployment['calibration']['ece_before']['val']:.4f} → "
-    f"scaled {deployment['calibration']['ece_after_temp']['val']:.4f} "
-    f"(T={deployment['calibration']['temperature']:.4f})",
-    f"- ECE test: raw {deployment['calibration']['ece_before']['test']:.4f} → "
-    f"scaled {deployment['calibration']['ece_after_temp']['test']:.4f}",
-    "",
-    "### Per-sub-type recall on OOD test (at deployment threshold)",
-    "| sub-type | n | recall |",
-    "|---|---|---|",
-]
-for sub, info in deployment["per_subtype_recall_test"].items():
-    trigger_block_lines.append(f"| {sub} | {info['n']} | {info['recall']:.4f} |")
-
-trigger_block_lines.extend(
-    [
-        "",
-        "### Robustness probe",
-        f"- Recall clean OOD: {deployment['robustness']['recall_clean']:.4f}",
-        f"- Recall corrupted OOD: {deployment['robustness']['recall_corrupted']:.4f}",
-    ]
-)
-
-trigger_block = "\\n".join(trigger_block_lines)
-
-# Replace the placeholder block in the card
-pattern = r"## Trigger-aware metrics.*?(?=\\n## )"
-patched, n = re.subn(pattern, trigger_block + "\\n\\n", card, count=1, flags=re.DOTALL)
-if n == 0:
-    patched = card + "\\n\\n" + trigger_block + "\\n"
-
-card_path.write_text(patched)
-print(f"Patched {card_path}")
-print("\\n--- Trigger-aware section preview ---")
-print(trigger_block)
+Tracing requires `CREWAI_TRACING_ENABLED=true`. See `src/.env.example`.
 """))
 
 

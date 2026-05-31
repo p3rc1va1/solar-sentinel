@@ -236,7 +236,9 @@ class SolarSentinelCrew:
                     verbose=False,
                 )
 
-                crew.kickoff()
+                # kickoff_async() is required when called from inside a running
+                # event loop — CrewAI 1.14 detects the loop and refuses kickoff().
+                await crew.kickoff_async()
                 result = self._parse_result(
                     analyze_task, planning_task, write_task, qa_task
                 )
